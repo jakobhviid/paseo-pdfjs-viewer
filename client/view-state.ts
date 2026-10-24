@@ -4,6 +4,10 @@ import { z } from "zod";
 export const SCALE_PRESETS = ["auto", "page-width", "page-fit", "page-actual"] as const;
 export type ScalePreset = (typeof SCALE_PRESETS)[number];
 
+/** Dragging selects text, or pans the page like PDF.js's hand tool. */
+export const TOOLS = ["select", "hand"] as const;
+export type Tool = (typeof TOOLS)[number];
+
 /**
  * Where the reader is, in the document's own coordinates so it survives rebuilds, window resizes,
  * and reopening the tab. Persisted with `useTabState`.
@@ -15,7 +19,9 @@ export const savedViewSchema = z.object({
   /** The top-left corner of the view in PDF points on `page`; null means the page's top. */
   left: z.number().nullable(),
   top: z.number().nullable(),
-  invert: z.boolean(),
+  // Defaults keep tabs saved before a preference existed valid, along with their position.
+  invert: z.boolean().default(false),
+  tool: z.enum(TOOLS).default("select"),
 });
 export type SavedView = z.infer<typeof savedViewSchema>;
 
@@ -25,6 +31,7 @@ export const defaultSavedView: SavedView = {
   left: null,
   top: null,
   invert: false,
+  tool: "select",
 };
 
 /** What PDF.js reports in `updateviewarea`: a percentage for numeric scales, else the preset. */
@@ -46,13 +53,20 @@ export function scaleValueFromLocation(scale: number | string): string {
   return Number.isFinite(numeric) && numeric > 0 ? String(numeric / 100) : "auto";
 }
 
-export function savedViewFromLocation(location: ViewerLocation, invert: boolean): SavedView {
+/** View preferences that ride along with the position. */
+export type ViewPreferences = Pick<SavedView, "invert" | "tool">;
+
+export function savedViewFromLocation(
+  location: ViewerLocation,
+  { invert, tool }: ViewPreferences,
+): SavedView {
   return {
     page: Math.max(1, Math.round(location.pageNumber)),
     scale: scaleValueFromLocation(location.scale),
     left: Number.isFinite(location.left) ? Math.round(location.left) : null,
     top: Number.isFinite(location.top) ? Math.round(location.top) : null,
     invert,
+    tool,
   };
 }
 

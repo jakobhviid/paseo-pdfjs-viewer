@@ -1,7 +1,7 @@
 import type { PluginRpcContract, PluginTheme } from "@getpaseo/plugin";
 import type { input as ZodInput, output as ZodOutput, ZodType } from "zod";
 import type { binaryData, runtimePart } from "../shared/rpc";
-import type { SavedView, ScalePreset, ViewerLocation } from "./view-state";
+import type { SavedView, ScalePreset, Tool, ViewerLocation } from "./view-state";
 
 // The contract between the cross-platform panel and the web-only viewer in client/web/. Keep it
 // free of DOM types: the panel is type-checked without the DOM library.
@@ -53,6 +53,7 @@ export interface ViewerController {
   setScale(scale: ScalePreset): void;
   find(query: string, options: { again: boolean; previous: boolean }): void;
   setInvert(invert: boolean): void;
+  setTool(tool: Tool): void;
   setTheme(theme: PluginTheme): void;
   destroy(): void;
 }
@@ -62,6 +63,7 @@ export interface CreateViewerControllerOptions {
   host: unknown;
   theme: PluginTheme;
   invert: boolean;
+  tool: Tool;
   fetchRuntimePart: FetchRuntimePart;
   fetchBinaryData: FetchBinaryData;
   callbacks: ViewerCallbacks;

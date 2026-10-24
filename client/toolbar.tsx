@@ -3,6 +3,7 @@ import { Icon } from "@getpaseo/plugin/client/ui";
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { findStatusLabel } from "./find-label";
+import type { Tool } from "./view-state";
 import type { FindStatus } from "./viewer-types";
 
 export interface ToolbarProps {
@@ -25,6 +26,8 @@ export interface ToolbarProps {
   onFind(previous: boolean): void;
   invert: boolean;
   onInvert(): void;
+  tool: Tool;
+  onTool(tool: Tool): void;
 }
 
 export function Toolbar(props: ToolbarProps) {
@@ -72,6 +75,13 @@ export function Toolbar(props: ToolbarProps) {
           </>
         )}
       </View>
+      {props.compact ? null : (
+        // Touch screens pan natively, so the switch is for mouse and trackpad users.
+        <View style={styles.group}>
+          <IconButton theme={theme} icon="TextCursor" label="Select text" selected={props.tool === "select"} disabled={disabled} onPress={() => props.onTool("select")} />
+          <IconButton theme={theme} icon="Hand" label="Hand tool" selected={props.tool === "hand"} disabled={disabled} onPress={() => props.onTool("hand")} />
+        </View>
+      )}
       <View style={[styles.group, styles.findGroup]}>
         <Icon name="Search" size={14} color={theme.colors.foregroundMuted} />
         <TextInput

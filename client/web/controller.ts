@@ -15,6 +15,7 @@ import {
   type SavedView,
   type ScalePreset,
   savedViewFromLocation,
+  type Tool,
   type ViewerLocation,
 } from "../view-state";
 import type {
@@ -41,6 +42,10 @@ interface Layer {
 const SWAP_TIMEOUT_MS = 2000;
 const PENDING_CLASS = "paseo-pdfjs-pending";
 const INVERT_CLASS = "paseo-pdfjs-invert";
+const HAND_CLASS = "paseo-pdfjs-hand";
+const GRABBING_CLASS = "paseo-pdfjs-grabbing";
+/** Where a hand-tool drag must not start, as in PDF.js's grab-to-pan: links and form controls. */
+const HAND_IGNORE = "a[href], a[href] *, input, textarea, button, button *, select, option";
 
 // PDF.js FindState values.
 const FIND_STATES: Record<number, FindStatus["state"]> = {
@@ -60,6 +65,7 @@ class PdfViewerController implements ViewerController {
   private openSequence = 0;
   private destroyed = false;
   private invert: boolean;
+  private tool: Tool;
   private password: string | undefined;
   private passwordTask: { task: PDFDocumentLoadingTask; update: (password: string) => void } | null =
     null;
@@ -73,6 +79,8 @@ class PdfViewerController implements ViewerController {
     host.appendChild(this.root);
     this.invert = options.invert;
     this.setInvert(options.invert);
+    this.tool = options.tool;
+    this.setTool(options.tool);
     this.setTheme(options.theme);
     this.root.addEventListener("click", this.onClick, true);
     this.resizeObserver = new ResizeObserver(() => this.onResize());
@@ -189,6 +197,11 @@ class PdfViewerController implements ViewerController {
     this.root.classList.toggle(INVERT_CLASS, invert);
   }
 
+  setTool(tool: Tool): void {
+    this.tool = tool;
+    this.root.classList.toggle(HAND_CLASS, tool === "hand");
+  }
+
   setTheme(theme: PluginTheme): void {
     this.root.style.backgroundColor = theme.colors.surface1;
   }
@@ -274,6 +287,7 @@ class PdfViewerController implements ViewerController {
     };
     this.listen(layer);
     container.addEventListener("wheel", (event) => this.onWheel(layer, event), { passive: false });
+    container.addEventListener("pointerdown", (event) => this.onPointerDown(layer, event));
     return layer;
   }
 
@@ -346,13 +360,14 @@ class PdfViewerController implements ViewerController {
 
   private currentView(): SavedView {
     const layer = this.current;
-    if (!layer) return { ...defaultSavedView, invert: this.invert };
-    if (layer.location) return savedViewFromLocation(layer.location, this.invert);
+    const preferences = { invert: this.invert, tool: this.tool };
+    if (!layer) return { ...defaultSavedView, ...preferences };
+    if (layer.location) return savedViewFromLocation(layer.location, preferences);
     return {
       ...defaultSavedView,
       page: layer.pdfViewer.currentPageNumber,
       scale: layer.pdfViewer.currentScaleValue || "auto",
-      invert: this.invert,
+      ...preferences,
     };
   }
 
@@ -389,6 +404,41 @@ class PdfViewerController implements ViewerController {
     } else {
       layer.pdfViewer.decreaseScale({ drawingDelay: 400, steps: 1, origin });
     }
+  }
+
+  /**
+   * The hand tool pans by dragging with the mouse. Touch and pen keep the browser's own panning,
+   * and links and form controls stay clickable because a drag never starts on them.
+   */
+  private onPointerDown(layer: Layer, event: PointerEvent): void {
+    if (this.tool !== "hand" || this.current !== layer) return;
+    if (event.pointerType !== "mouse" || event.button !== 0) return;
+    if ((event.target as Element | null)?.closest?.(HAND_IGNORE)) return;
+    const container = layer.container;
+    const start = {
+      x: event.clientX,
+      y: event.clientY,
+      left: container.scrollLeft,
+      top: container.scrollTop,
+    };
+    // Keeps the browser from starting a text selection, and keeps keyboard scrolling working.
+    event.preventDefault();
+    container.focus({ preventScroll: true });
+    container.setPointerCapture(event.pointerId);
+    this.root.classList.add(GRABBING_CLASS);
+    const onMove = (move: PointerEvent) => {
+      container.scrollLeft = start.left - (move.clientX - start.x);
+      container.scrollTop = start.top - (move.clientY - start.y);
+    };
+    const onEnd = () => {
+      container.removeEventListener("pointermove", onMove);
+      container.removeEventListener("pointerup", onEnd);
+      container.removeEventListener("pointercancel", onEnd);
+      this.root.classList.remove(GRABBING_CLASS);
+    };
+    container.addEventListener("pointermove", onMove);
+    container.addEventListener("pointerup", onEnd);
+    container.addEventListener("pointercancel", onEnd);
   }
 
   /** Web links leave through Paseo's opener rather than navigating the app. */

@@ -7,6 +7,7 @@ What you can do in the viewer:
 - Select and copy text, and follow links. Links inside the document jump within it; web links open in your browser.
 - Search the document, with a match count and highlighting.
 - Move by page, zoom in and out, fit the width or the whole page, or pinch and Ctrl+scroll to zoom.
+- Switch between selecting text and a hand tool that pans the page when you drag with the mouse. The tab remembers which one you used.
 - Invert page colors for reading in a dark theme.
 - Open password-protected PDFs. The password is kept in memory only, never saved, and reused when the file is rebuilt.
 

@@ -67,6 +67,10 @@ const OWN_CSS = `
 .${SCOPE_CLASS} .paseo-pdfjs-container { position: absolute; inset: 0; overflow: auto; outline: none; }
 .${SCOPE_CLASS} .paseo-pdfjs-container.paseo-pdfjs-pending { visibility: hidden; }
 .${SCOPE_CLASS}.paseo-pdfjs-invert .canvasWrapper { filter: invert(1) hue-rotate(180deg); }
+.${SCOPE_CLASS}.paseo-pdfjs-hand .paseo-pdfjs-container,
+.${SCOPE_CLASS}.paseo-pdfjs-hand .textLayer * { cursor: grab; user-select: none; -webkit-user-select: none; }
+.${SCOPE_CLASS}.paseo-pdfjs-grabbing .paseo-pdfjs-container,
+.${SCOPE_CLASS}.paseo-pdfjs-grabbing .paseo-pdfjs-container * { cursor: grabbing !important; }
 `;
 
 /**

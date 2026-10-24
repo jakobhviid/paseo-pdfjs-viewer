@@ -24,6 +24,7 @@ import {
   savedViewFromLocation,
   savedViewSchema,
   scaleLabel,
+  type Tool,
   type ViewerLocation,
 } from "./view-state";
 import type { CreateViewerController, FindStatus, ViewerController } from "./viewer-types";
@@ -70,14 +71,15 @@ export function WebPdfPanel({ file, tab, theme, layout }: PluginFilePanelProps) 
     const { createViewerController } = require("./web/controller") as {
       createViewerController: CreateViewerController;
     };
-    // Built when it fires, so the invert setting is the current one.
+    // Built when it fires, so the view preferences are the current ones.
     const saveLocation = throttle((location: ViewerLocation) => {
-      setSaved(savedViewFromLocation(location, savedRef.current.invert));
+      setSaved(savedViewFromLocation(location, savedRef.current));
     }, SAVE_VIEW_MS);
     const controller = createViewerController({
       host: host.current,
       theme: themeRef.current,
       invert: savedRef.current.invert,
+      tool: savedRef.current.tool,
       fetchRuntimePart,
       fetchBinaryData,
       callbacks: {
@@ -154,6 +156,13 @@ export function WebPdfPanel({ file, tab, theme, layout }: PluginFilePanelProps) 
     setSaved({ ...savedRef.current, invert });
     viewer.current?.setInvert(invert);
   }, [setSaved]);
+  const onTool = useCallback(
+    (tool: Tool) => {
+      setSaved({ ...savedRef.current, tool });
+      viewer.current?.setTool(tool);
+    },
+    [setSaved],
+  );
   const retry = useCallback(() => reloads.current?.request(true), []);
 
   const styles = useMemo(() => panelStyles(theme), [theme]);
@@ -181,6 +190,8 @@ export function WebPdfPanel({ file, tab, theme, layout }: PluginFilePanelProps) 
         onFind={onFind}
         invert={saved.invert}
         onInvert={onInvert}
+        tool={saved.tool}
+        onTool={onTool}
       />
       {status ? (
         <View style={styles.banner} testID="pdfjs-status">
