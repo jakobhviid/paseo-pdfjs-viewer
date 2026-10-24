@@ -1,0 +1,40 @@
+{
+  "name": "paseo-pdfjs-viewer",
+  "private": true,
+  "version": "0.1.0",
+  "description": "View PDFs in Paseo's file tab with PDF.js: text selection, search, links, live reload that keeps your place.",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "paseo-plugin.json",
+    "OVERVIEW.md",
+    "index.client.tsx",
+    "index.server.ts",
+    "client/",
+    "server/",
+    "shared/",
+    "scripts/",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "vitest run",
+    "prepare": "node scripts/embed-pdfjs.mjs"
+  },
+  "dependencies": {
+    "pdfjs-dist": "6.4.299"
+  },
+  "devDependencies": {
+    "@getpaseo/plugin": "0.13.0",
+    "@tanstack/react-query": "^5.90.11",
+    "@types/react": "~19.2.0",
+    "esbuild": "^0.27.3",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
+    "zod": "^4.4.3"
+  }
+}
