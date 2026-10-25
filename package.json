@@ -1,8 +1,8 @@
 {
   "name": "paseo-pdfjs-viewer",
   "private": true,
-  "version": "0.1.0",
-  "description": "View PDFs in Paseo's file tab with PDF.js: text selection, search, links, live reload that keeps your place.",
+  "version": "0.2.0",
+  "description": "View PDFs in Paseo's file tab with PDF.js, and on iOS with pages rendered by PDFium: live reload that keeps your place.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/bendavid/paseo-pdfjs-viewer.git"
@@ -34,6 +34,7 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
+    "@hyzyla/pdfium": "3.0.0",
     "pdfjs-dist": "6.4.299"
   },
   "devDependencies": {

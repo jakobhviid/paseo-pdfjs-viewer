@@ -13,13 +13,15 @@ What you can do in the viewer:
 - Invert page colors for reading in a dark theme.
 - Open password-protected PDFs. The password is kept in memory only, never saved, and reused when the file is rebuilt.
 
+On iPhone and iPad, Paseo plugins cannot run PDF.js, so the daemon renders pages with PDFium and the tab shows them as images. Scroll through the pages, pinch to zoom up to 4x (pages re-render sharper as you zoom), step by page from the toolbar, and invert page colors. A rebuild re-renders the pages near you and keeps your place on the page, and each page shows its previous version until the new one has loaded. The tab remembers your page. Text selection, search, and links are desktop and web only.
+
 Setup: Paseo 0.13.0 or later on both the app and the daemon. Installing from a Git repository or the registry runs `npm ci` and `node` on the daemon host, so both need to be on its PATH.
 
 Limits:
 
-- Works in the desktop app and in a browser. The iOS and Android apps show a message instead, because Paseo plugins cannot run PDF.js there yet.
-- The whole file is read into the app each time it changes, over the relay when the host is remote. Files over 64 MB ask before opening.
+- Works in the desktop app, in a browser, and on iOS. The Android app shows a message instead.
+- On desktop and web, the whole file is read into the app each time it changes, over the relay when the host is remote. Files over 64 MB ask before opening. On iOS only the rendered pages near the view are sent, as PNG images.
 - Chinese, Japanese, and Korean text that uses non-embedded fonts needs a matching font installed on the computer you view it on.
 - The viewer does not fill in forms, edit annotations, print, or save.
 
-The plugin's server code sends the PDF.js library and its fonts, character maps, and image decoders to the app; nothing is fetched from the internet.
+The plugin's server code sends the PDF.js library and its fonts, character maps, and image decoders to the app, and on iOS renders pages with a PDFium build bundled in the plugin; nothing is fetched from the internet. To render for iOS, the server code reads `.pdf` files the app opens, by their path on the daemon host.

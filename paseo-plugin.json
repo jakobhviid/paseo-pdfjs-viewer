@@ -1,7 +1,7 @@
 {
   "id": "pdfjs-viewer",
   "name": "PDF viewer (PDF.js)",
-  "description": "Read PDFs in Paseo's file tab with PDF.js: selectable text, search, links, and live reload that keeps your page.",
+  "description": "Read PDFs in Paseo's file tab with PDF.js, and on iOS with pages rendered on the daemon: live reload that keeps your page.",
   "translations": {
     "zh-CN": {
       "name": "PDF 查看器（PDF.js）",

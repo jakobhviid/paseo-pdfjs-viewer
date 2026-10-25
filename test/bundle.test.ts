@@ -41,11 +41,33 @@ describe("client bundle", () => {
   it("leaves PDF.js out; the app loads it from the plugin server on web", async () => {
     const bundle = await compileClient();
     expect(bundle).not.toContain("pdfjsLib");
+    expect(bundle).not.toContain("FPDF_");
     expect(bundle.length).toBeLessThan(200_000);
   });
 });
 
 describe("server bundle", () => {
+  it.runIf(existsSync("server/generated/pdfjs-assets.js"))(
+    "inlines PDFium for the iOS renderer, leaving only host modules external",
+    async () => {
+      // Mirrors the server options in Paseo's plugin compiler.
+      const result = await build({
+        entryPoints: ["index.server.ts"],
+        bundle: true,
+        format: "cjs",
+        platform: "node",
+        target: "node20",
+        external: ["@getpaseo/plugin", "@getpaseo/plugin/server", "zod"],
+        logLevel: "silent",
+        write: false,
+      });
+      const bundle = result.outputFiles[0].text;
+      expect(bundle).not.toMatch(/require\(["']@hyzyla\/pdfium/);
+      expect(bundle).toContain("FPDF_LoadMemDocument");
+    },
+    30_000,
+  );
+
   it.runIf(existsSync("server/generated/pdfjs-assets.js"))(
     "embeds the PDF.js runtime and its binary data",
     async () => {
