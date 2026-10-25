@@ -28,6 +28,7 @@ import {
   type ViewerLocation,
   zoomMenuItems,
 } from "./view-state";
+import { TooltipProvider } from "./tooltip";
 import { ZOOM_MENU_WIDTH, ZoomMenu } from "./zoom-menu";
 import type { CreateViewerController, FindStatus, ViewerController } from "./viewer-types";
 
@@ -182,7 +183,10 @@ export function WebPdfPanel({ file, tab, theme, layout }: PluginFilePanelProps) 
     anchor.measureInWindow((x, y, _width, height) => {
       container.measureInWindow((panelX, panelY) => {
         const maxLeft = Math.max(0, panelWidth.current - ZOOM_MENU_WIDTH - 4);
-        setZoomMenu({ left: Math.min(Math.max(0, x - panelX), maxLeft), top: y - panelY + height + 4 });
+        setZoomMenu({
+          left: Math.min(Math.max(0, x - panelX), maxLeft),
+          top: y - panelY + height + 4,
+        });
       });
     });
   }, []);
@@ -205,31 +209,33 @@ export function WebPdfPanel({ file, tab, theme, layout }: PluginFilePanelProps) 
         panelWidth.current = event.nativeEvent.layout.width;
       }}
     >
-      <Toolbar
-        theme={theme}
-        compact={layout.compact}
-        disabled={!loaded}
-        page={page}
-        pageCount={pageCount}
-        onPage={(next) => viewer.current?.setPage(next)}
-        onPreviousPage={() => viewer.current?.previousPage()}
-        onNextPage={() => viewer.current?.nextPage()}
-        scaleLabel={loaded ? scaleLabel(scale.scaleValue, scale.scale) : "–"}
-        zoomMenuOpen={zoomMenu !== null}
-        onOpenZoomMenu={openZoomMenu}
-        onZoomIn={() => viewer.current?.zoomIn()}
-        onZoomOut={() => viewer.current?.zoomOut()}
-        onFitWidth={() => viewer.current?.setScale("page-width")}
-        onFitPage={() => viewer.current?.setScale("page-fit")}
-        findQuery={findQuery}
-        find={find}
-        onFindQuery={onFindQuery}
-        onFind={onFind}
-        invert={saved.invert}
-        onInvert={onInvert}
-        tool={saved.tool}
-        onTool={onTool}
-      />
+      <TooltipProvider panel={panel} theme={theme}>
+        <Toolbar
+          theme={theme}
+          compact={layout.compact}
+          disabled={!loaded}
+          page={page}
+          pageCount={pageCount}
+          onPage={(next) => viewer.current?.setPage(next)}
+          onPreviousPage={() => viewer.current?.previousPage()}
+          onNextPage={() => viewer.current?.nextPage()}
+          scaleLabel={loaded ? scaleLabel(scale.scaleValue, scale.scale) : "–"}
+          zoomMenuOpen={zoomMenu !== null}
+          onOpenZoomMenu={openZoomMenu}
+          onZoomIn={() => viewer.current?.zoomIn()}
+          onZoomOut={() => viewer.current?.zoomOut()}
+          onFitWidth={() => viewer.current?.setScale("page-width")}
+          onFitPage={() => viewer.current?.setScale("page-fit")}
+          findQuery={findQuery}
+          find={find}
+          onFindQuery={onFindQuery}
+          onFind={onFind}
+          invert={saved.invert}
+          onInvert={onInvert}
+          tool={saved.tool}
+          onTool={onTool}
+        />
+      </TooltipProvider>
       {status ? (
         <View style={styles.banner} testID="pdfjs-status">
           <Text style={status.danger ? styles.bannerDanger : styles.bannerText}>{status.text}</Text>
@@ -303,7 +309,8 @@ function statusMessage({
   reload: { state: ReloadState; error: string | null };
   deleted: boolean;
 }): { text: string; danger: boolean; retry: boolean } | null {
-  if (deleted) return { text: "The file was deleted. Showing the last version.", danger: false, retry: false };
+  if (deleted)
+    return { text: "The file was deleted. Showing the last version.", danger: false, retry: false };
   if (!loaded) return null;
   if (reload.state === "failed") {
     return { text: "Couldn't load the latest version.", danger: true, retry: true };
@@ -406,7 +413,11 @@ function panelStyles(theme: PluginFilePanelProps["theme"]) {
     },
     card: { maxWidth: 420, gap: 8, alignItems: "center" as const },
     message: { color: theme.colors.foreground, textAlign: "center" as const },
-    messageMuted: { color: theme.colors.foregroundMuted, textAlign: "center" as const, fontSize: 13 },
+    messageMuted: {
+      color: theme.colors.foregroundMuted,
+      textAlign: "center" as const,
+      fontSize: 13,
+    },
     errorText: { color: theme.colors.statusDanger, textAlign: "center" as const },
     passwordInput: {
       width: 240,

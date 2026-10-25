@@ -65,6 +65,7 @@ it later with **Open with…** in the tab menu or in **Settings › Files**.
 npm install
 npm run typecheck
 npm test
+npm run format         # Prettier
 paseo plugin install "$PWD"
 paseo plugin reload pdfjs-viewer   # after changes
 ```

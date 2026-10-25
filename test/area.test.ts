@@ -83,11 +83,17 @@ describe("joinTextPieces", () => {
 
   it("joins pieces on one line, adding a space only for a visible gap", () => {
     expect(
-      joinTextPieces([piece("a^2", 0, 20, 100), piece("+b", 20, 32, 101), piece("holds", 40, 80, 100)]),
+      joinTextPieces([
+        piece("a^2", 0, 20, 100),
+        piece("+b", 20, 32, 101),
+        piece("holds", 40, 80, 100),
+      ]),
     ).toBe("a^2+b holds");
   });
 
   it("drops trailing spaces from each line", () => {
-    expect(joinTextPieces([piece("text   ", 0, 60, 100), piece("more", 0, 40, 120)])).toBe("text\nmore");
+    expect(joinTextPieces([piece("text   ", 0, 60, 100), piece("more", 0, 40, 120)])).toBe(
+      "text\nmore",
+    );
   });
 });

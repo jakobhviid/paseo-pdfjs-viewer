@@ -3,6 +3,7 @@ import { Icon } from "@getpaseo/plugin/client/ui";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { findStatusLabel } from "./find-label";
+import { useTooltip } from "./tooltip";
 import type { Tool } from "./view-state";
 import type { FindStatus } from "./viewer-types";
 
@@ -37,6 +38,9 @@ export function Toolbar(props: ToolbarProps) {
   const { theme, disabled } = props;
   const styles = useMemo(() => toolbarStyles(theme), [theme]);
   const zoomButton = useRef<View>(null);
+  const zoomTooltip = useTooltip(props.zoomMenuOpen ? null : { text: "Zoom level" }, zoomButton);
+  const pageTooltip = useTooltip({ text: "Go to page", keys: ["Enter"] });
+  const findTooltip = useTooltip({ text: "Find in the document", keys: ["Enter"] });
   const [pageText, setPageText] = useState(String(props.page));
   useEffect(() => setPageText(String(props.page)), [props.page]);
   const submitPage = () => {
@@ -48,26 +52,53 @@ export function Toolbar(props: ToolbarProps) {
   return (
     <View style={styles.bar} testID="pdfjs-toolbar">
       <View style={styles.group}>
-        <IconButton theme={theme} icon="ChevronLeft" label="Previous page" disabled={disabled || props.page <= 1} onPress={props.onPreviousPage} />
-        <TextInput
-          style={[styles.input, styles.pageInput]}
-          value={pageText}
-          onChangeText={setPageText}
-          onSubmitEditing={submitPage}
-          onBlur={submitPage}
-          editable={!disabled}
-          inputMode="numeric"
-          selectTextOnFocus
-          accessibilityLabel="Page number"
-          testID="pdfjs-page-input"
+        <IconButton
+          theme={theme}
+          icon="ChevronLeft"
+          label="Previous page"
+          keys={["←"]}
+          disabled={disabled || props.page <= 1}
+          onPress={props.onPreviousPage}
         />
+        <View
+          ref={pageTooltip.ref}
+          onPointerEnter={pageTooltip.onHoverIn}
+          onPointerLeave={pageTooltip.onHoverOut}
+        >
+          <TextInput
+            style={[styles.input, styles.pageInput]}
+            value={pageText}
+            onChangeText={setPageText}
+            onSubmitEditing={submitPage}
+            onBlur={submitPage}
+            editable={!disabled}
+            inputMode="numeric"
+            selectTextOnFocus
+            accessibilityLabel="Page number"
+            testID="pdfjs-page-input"
+            onFocus={pageTooltip.onHoverOut}
+          />
+        </View>
         <Text style={styles.muted} testID="pdfjs-page-count">
           / {props.pageCount || "–"}
         </Text>
-        <IconButton theme={theme} icon="ChevronRight" label="Next page" disabled={disabled || props.page >= props.pageCount} onPress={props.onNextPage} />
+        <IconButton
+          theme={theme}
+          icon="ChevronRight"
+          label="Next page"
+          keys={["→"]}
+          disabled={disabled || props.page >= props.pageCount}
+          onPress={props.onNextPage}
+        />
       </View>
       <View style={styles.group}>
-        <IconButton theme={theme} icon="ZoomOut" label="Zoom out" disabled={disabled} onPress={props.onZoomOut} />
+        <IconButton
+          theme={theme}
+          icon="ZoomOut"
+          label="Zoom out"
+          disabled={disabled}
+          onPress={props.onZoomOut}
+        />
         <Pressable
           ref={zoomButton}
           accessibilityRole="button"
@@ -75,10 +106,15 @@ export function Toolbar(props: ToolbarProps) {
           accessibilityState={{ disabled, expanded: props.zoomMenuOpen }}
           disabled={disabled}
           onPress={() => props.onOpenZoomMenu(zoomButton.current)}
+          onHoverIn={zoomTooltip.onHoverIn}
+          onHoverOut={zoomTooltip.onHoverOut}
+          onPressIn={zoomTooltip.onPressIn}
           testID="pdfjs-zoom-menu-button"
           style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
             styles.zoomButton,
-            (pressed || hovered || props.zoomMenuOpen) && { backgroundColor: theme.colors.surface2 },
+            (pressed || hovered || props.zoomMenuOpen) && {
+              backgroundColor: theme.colors.surface2,
+            },
           ]}
         >
           <Text style={[styles.label, styles.scale]} testID="pdfjs-scale">
@@ -86,25 +122,72 @@ export function Toolbar(props: ToolbarProps) {
           </Text>
           <Icon name="ChevronDown" size={12} color={theme.colors.foregroundMuted} />
         </Pressable>
-        <IconButton theme={theme} icon="ZoomIn" label="Zoom in" disabled={disabled} onPress={props.onZoomIn} />
+        <IconButton
+          theme={theme}
+          icon="ZoomIn"
+          label="Zoom in"
+          disabled={disabled}
+          onPress={props.onZoomIn}
+        />
         {props.compact ? null : (
           <>
-            <IconButton theme={theme} icon="MoveHorizontal" label="Fit width" disabled={disabled} onPress={props.onFitWidth} />
-            <IconButton theme={theme} icon="Maximize" label="Fit page" disabled={disabled} onPress={props.onFitPage} />
+            <IconButton
+              theme={theme}
+              icon="MoveHorizontal"
+              label="Fit width"
+              disabled={disabled}
+              onPress={props.onFitWidth}
+            />
+            <IconButton
+              theme={theme}
+              icon="Maximize"
+              label="Fit page"
+              disabled={disabled}
+              onPress={props.onFitPage}
+            />
           </>
         )}
       </View>
       {props.compact ? null : (
         // Touch screens pan natively, so the switch is for mouse and trackpad users.
         <View style={styles.group}>
-          <IconButton theme={theme} icon="TextCursor" label="Select text" selected={props.tool === "select"} disabled={disabled} onPress={() => props.onTool("select")} />
-          <IconButton theme={theme} icon="Hand" label="Hand tool" selected={props.tool === "hand"} disabled={disabled} onPress={() => props.onTool("hand")} />
-          <IconButton theme={theme} icon="SquareDashedMousePointer" label="Select area" selected={props.tool === "area"} disabled={disabled} onPress={() => props.onTool("area")} />
+          <IconButton
+            theme={theme}
+            icon="TextCursor"
+            label="Select text"
+            tooltip="Select text: drag to select"
+            selected={props.tool === "select"}
+            disabled={disabled}
+            onPress={() => props.onTool("select")}
+          />
+          <IconButton
+            theme={theme}
+            icon="Hand"
+            label="Hand tool"
+            tooltip="Hand tool: drag to move the page"
+            selected={props.tool === "hand"}
+            disabled={disabled}
+            onPress={() => props.onTool("hand")}
+          />
+          <IconButton
+            theme={theme}
+            icon="SquareDashedMousePointer"
+            label="Select area"
+            tooltip="Select area: drag to copy text or an image"
+            selected={props.tool === "area"}
+            disabled={disabled}
+            onPress={() => props.onTool("area")}
+          />
         </View>
       )}
       <View style={[styles.group, styles.findGroup]}>
         <Icon name="Search" size={14} color={theme.colors.foregroundMuted} />
-        <View style={styles.findField}>
+        <View
+          ref={findTooltip.ref}
+          style={styles.findField}
+          onPointerEnter={findTooltip.onHoverIn}
+          onPointerLeave={findTooltip.onHoverOut}
+        >
           <TextInput
             style={[styles.input, styles.findInput]}
             value={props.findQuery}
@@ -115,6 +198,7 @@ export function Toolbar(props: ToolbarProps) {
             placeholderTextColor={theme.colors.foregroundMuted}
             accessibilityLabel="Find in document"
             testID="pdfjs-find-input"
+            onFocus={findTooltip.onHoverOut}
             // Keep focus after Enter so repeated Enter steps through matches.
             blurOnSubmit={false}
           />
@@ -127,10 +211,30 @@ export function Toolbar(props: ToolbarProps) {
             {findStatusLabel(props.find, props.findQuery)}
           </Text>
         </View>
-        <IconButton theme={theme} icon="ChevronUp" label="Previous match" disabled={disabled || !props.findQuery} onPress={() => props.onFind(true)} />
-        <IconButton theme={theme} icon="ChevronDown" label="Next match" disabled={disabled || !props.findQuery} onPress={() => props.onFind(false)} />
+        <IconButton
+          theme={theme}
+          icon="ChevronUp"
+          label="Previous match"
+          disabled={disabled || !props.findQuery}
+          onPress={() => props.onFind(true)}
+        />
+        <IconButton
+          theme={theme}
+          icon="ChevronDown"
+          label="Next match"
+          keys={["Enter"]}
+          disabled={disabled || !props.findQuery}
+          onPress={() => props.onFind(false)}
+        />
       </View>
-      <IconButton theme={theme} icon="Contrast" label={props.invert ? "Show original colors" : "Invert colors"} selected={props.invert} disabled={disabled} onPress={props.onInvert} />
+      <IconButton
+        theme={theme}
+        icon="Contrast"
+        label={props.invert ? "Show original colors" : "Invert colors"}
+        selected={props.invert}
+        disabled={disabled}
+        onPress={props.onInvert}
+      />
     </View>
   );
 }
@@ -139,29 +243,47 @@ interface IconButtonProps {
   theme: PluginTheme;
   icon: string;
   label: string;
+  /** The hover text when it should say more than the label. */
+  tooltip?: string;
+  /** Keyboard keys for the same action, shown in the tooltip. */
+  keys?: readonly string[];
   disabled?: boolean;
   selected?: boolean;
   onPress(): void;
 }
 
-export function IconButton({ theme, icon, label, disabled, selected, onPress }: IconButtonProps) {
+export function IconButton({
+  theme,
+  icon,
+  label,
+  tooltip,
+  keys,
+  disabled,
+  selected,
+  onPress,
+}: IconButtonProps) {
+  const hover = useTooltip({ text: tooltip ?? label, keys });
+  // The tooltip listens on a wrapper: a disabled Pressable reports no hover, and a disabled
+  // button is when its tooltip is most useful.
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ disabled: !!disabled, selected: !!selected }}
-      disabled={disabled}
-      onPress={onPress}
-      style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => ({
-        padding: 6,
-        borderRadius: 6,
-        opacity: disabled ? 0.4 : 1,
-        backgroundColor:
-          selected || pressed || hovered ? theme.colors.surface2 : "transparent",
-      })}
-    >
-      <Icon name={icon} size={16} color={theme.colors.foreground} />
-    </Pressable>
+    <View ref={hover.ref} onPointerEnter={hover.onHoverIn} onPointerLeave={hover.onHoverOut}>
+      <Pressable
+        onPressIn={hover.onPressIn}
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        accessibilityState={{ disabled: !!disabled, selected: !!selected }}
+        disabled={disabled}
+        onPress={onPress}
+        style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => ({
+          padding: 6,
+          borderRadius: 6,
+          opacity: disabled ? 0.4 : 1,
+          backgroundColor: selected || pressed || hovered ? theme.colors.surface2 : "transparent",
+        })}
+      >
+        <Icon name={icon} size={16} color={theme.colors.foreground} />
+      </Pressable>
+    </View>
   );
 }
 
@@ -180,10 +302,9 @@ function toolbarStyles(theme: PluginTheme) {
       borderBottomColor: theme.colors.border,
     },
     group: { flexDirection: "row" as const, alignItems: "center" as const, gap: 2 },
-    // Starts narrow and grows into the space left on the row, so the toolbar wraps only when
-    // the panel is genuinely narrow.
-    // An explicit basis: with "auto" the browser sizes the group from the <input>'s preferred
-    // width (20 characters), and the group wraps to its own row long before it has to.
+    // Starts narrow and grows into the space left on the row, so the toolbar wraps only when the
+    // panel is genuinely narrow. The basis is explicit: with "auto" the browser sizes the group
+    // from the <input>'s preferred width (20 characters) and wraps it long before it has to.
     findGroup: {
       flexGrow: 1,
       flexBasis: 190,

@@ -50,7 +50,10 @@ describe("savedViewSchema", () => {
 
 describe("restoreTarget", () => {
   it("returns to the saved corner of the saved page, keeping the zoom", () => {
-    const target = restoreTarget({ ...defaultSavedView, page: 4, scale: "1.5", left: 10, top: 500 }, 9);
+    const target = restoreTarget(
+      { ...defaultSavedView, page: 4, scale: "1.5", left: 10, top: 500 },
+      9,
+    );
     expect(target).toEqual({
       scaleValue: "1.5",
       pageNumber: 4,

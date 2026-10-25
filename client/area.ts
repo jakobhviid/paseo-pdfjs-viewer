@@ -28,7 +28,12 @@ export function rectFromPoints(
   const x2 = clampX(end.x);
   const y1 = clampY(start.y);
   const y2 = clampY(end.y);
-  return { x: Math.min(x1, x2), y: Math.min(y1, y2), width: Math.abs(x2 - x1), height: Math.abs(y2 - y1) };
+  return {
+    x: Math.min(x1, x2),
+    y: Math.min(y1, y2),
+    width: Math.abs(x2 - x1),
+    height: Math.abs(y2 - y1),
+  };
 }
 
 export function isUsableArea(rect: AreaRect): boolean {
@@ -51,7 +56,10 @@ export function imageScale(rect: AreaRect, devicePixelRatio: number): number {
 /** Where the Copy bar goes: below the area, else above it, else inside its top edge. */
 export function actionBarPosition(rect: AreaRect, page: Size, bar: Size): { x: number; y: number } {
   const gap = 6;
-  const x = Math.min(Math.max(0, rect.x + rect.width - bar.width), Math.max(0, page.width - bar.width));
+  const x = Math.min(
+    Math.max(0, rect.x + rect.width - bar.width),
+    Math.max(0, page.width - bar.width),
+  );
   if (rect.y + rect.height + gap + bar.height <= page.height) {
     return { x, y: rect.y + rect.height + gap };
   }

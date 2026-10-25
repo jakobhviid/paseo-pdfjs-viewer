@@ -51,10 +51,7 @@ const runtime = {
 // Keys match PDF.js's BinaryDataFactory `kind` values.
 const binary = {
   cMapUrl: readBase64Directory("cmaps", (name) => name.endsWith(".bcmap")),
-  standardFontDataUrl: readBase64Directory(
-    "standard_fonts",
-    (name) => !name.startsWith("LICENSE"),
-  ),
+  standardFontDataUrl: readBase64Directory("standard_fonts", (name) => !name.startsWith("LICENSE")),
   // Image decoders only: the QuickJS scripting sandbox is not enabled, and the ICC module is used
   // only when the worker fetches files itself.
   wasmUrl: readBase64Directory("wasm", (name) => name === "jbig2.wasm" || name === "openjpeg.wasm"),
@@ -73,9 +70,9 @@ writeFileSync(
 writeFileSync(
   path.join(outDir, "pdfjs-assets.d.ts"),
   `${banner}export declare const pdfjsVersion: string;\n` +
-    "export declare const runtime: Readonly<Record<\"pdf\" | \"viewer\" | \"worker\" | \"css\", string>>;\n" +
+    'export declare const runtime: Readonly<Record<"pdf" | "viewer" | "worker" | "css", string>>;\n' +
     "export declare const binary: Readonly<\n" +
-    "  Record<\"cMapUrl\" | \"standardFontDataUrl\" | \"wasmUrl\", Readonly<Record<string, string>>>\n" +
+    '  Record<"cMapUrl" | "standardFontDataUrl" | "wasmUrl", Readonly<Record<string, string>>>\n' +
     ">;\n",
 );
 

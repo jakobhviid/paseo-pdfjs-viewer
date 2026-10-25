@@ -78,8 +78,10 @@ class PdfViewerController implements ViewerController {
   private invert: boolean;
   private tool: Tool;
   private password: string | undefined;
-  private passwordTask: { task: PDFDocumentLoadingTask; update: (password: string) => void } | null =
-    null;
+  private passwordTask: {
+    task: PDFDocumentLoadingTask;
+    update: (password: string) => void;
+  } | null = null;
   private findQuery = "";
   private readonly area: AreaSelection;
   /** Set while restoring a saved or rebuilt view, which is not a navigation. */
@@ -382,12 +384,21 @@ class PdfViewerController implements ViewerController {
     );
     layer.eventBus.on(
       "updatefindcontrolstate",
-      ({ state, matchesCount }: { state: number; matchesCount: { current: number; total: number } }) =>
-        reportFind(matchesCount, FIND_STATES[state] ?? "pending"),
+      ({
+        state,
+        matchesCount,
+      }: {
+        state: number;
+        matchesCount: { current: number; total: number };
+      }) => reportFind(matchesCount, FIND_STATES[state] ?? "pending"),
     );
   }
 
-  private dispatchFind(layer: Layer, query: string, options: { again: boolean; previous: boolean }) {
+  private dispatchFind(
+    layer: Layer,
+    query: string,
+    options: { again: boolean; previous: boolean },
+  ) {
     layer.eventBus.dispatch("find", {
       source: this,
       type: options.again ? "again" : "",
@@ -440,7 +451,10 @@ class PdfViewerController implements ViewerController {
       right: frame.left + container.clientLeft + container.clientWidth,
       bottom: frame.top + container.clientTop + container.clientHeight,
     };
-    return pageNearestCenter(visiblePageBoxes(layer.pdfViewer, view), view) ?? layer.pdfViewer.currentPageNumber;
+    return (
+      pageNearestCenter(visiblePageBoxes(layer.pdfViewer, view), view) ??
+      layer.pdfViewer.currentPageNumber
+    );
   }
 
   private heldPin(layer: Layer): PinnedPage | null {
@@ -590,7 +604,11 @@ function visiblePageBoxes(viewer: PDFViewer, view: Box): PageBox[] {
     return { page, left, top, right: left + div.clientWidth, bottom: top + div.clientHeight };
   };
   const isVisible = (box: PageBox | null): box is PageBox =>
-    box !== null && box.bottom > view.top && box.top < view.bottom && box.right > view.left && box.left < view.right;
+    box !== null &&
+    box.bottom > view.top &&
+    box.top < view.bottom &&
+    box.right > view.left &&
+    box.left < view.right;
   const start = Math.min(Math.max(1, viewer.currentPageNumber), viewer.pagesCount);
   const boxes: PageBox[] = [];
   for (let page = start; page >= 1; page -= 1) {

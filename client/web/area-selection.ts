@@ -54,7 +54,8 @@ export class AreaSelection {
     this.clear();
     const pageDiv = target?.closest?.(".page") as HTMLDivElement | null;
     if (!pageDiv) return;
-    const page = pdfViewer.getPageView(Number(pageDiv.dataset.pageNumber) - 1) as PageView | undefined;
+    const page = pdfViewer.getPageView(Number(pageDiv.dataset.pageNumber) - 1) as
+      PageView | undefined;
     if (!page?.pdfPage) return;
 
     // Keeps the browser from starting a text selection.
@@ -125,7 +126,8 @@ export class AreaSelection {
     }
     navigator.clipboard.writeText(text).then(
       () => this.options.notify("Copied text.", "info"),
-      (error: unknown) => this.options.notify(`Couldn't copy the text: ${messageOf(error)}`, "error"),
+      (error: unknown) =>
+        this.options.notify(`Couldn't copy the text: ${messageOf(error)}`, "error"),
     );
   }
 
@@ -136,13 +138,19 @@ export class AreaSelection {
     this.clear();
     navigator.clipboard.write([new ClipboardItem({ "image/png": image })]).then(
       () => this.options.notify("Copied image.", "info"),
-      (error: unknown) => this.options.notify(`Couldn't copy the image: ${messageOf(error)}`, "error"),
+      (error: unknown) =>
+        this.options.notify(`Couldn't copy the image: ${messageOf(error)}`, "error"),
     );
   }
 }
 
 /** The page's drawing area on screen: inside its border, where PDF.js draws the page. */
-function pageFrame(pageDiv: HTMLDivElement): { left: number; top: number; offsetX: number; offsetY: number } {
+function pageFrame(pageDiv: HTMLDivElement): {
+  left: number;
+  top: number;
+  offsetX: number;
+  offsetY: number;
+} {
   const page = pageDiv.getBoundingClientRect();
   const paddingLeft = page.left + pageDiv.clientLeft;
   const paddingTop = page.top + pageDiv.clientTop;
@@ -200,7 +208,13 @@ function textInArea(pageDiv: HTMLDivElement, rect: AreaRect): string {
       const y = char.top + char.height / 2;
       if (x < box.left || x > box.right || y < box.top || y > box.bottom) continue;
       if (!piece) {
-        piece = { text: "", left: char.left, right: char.right, top: char.top, bottom: char.bottom };
+        piece = {
+          text: "",
+          left: char.left,
+          right: char.right,
+          top: char.top,
+          bottom: char.bottom,
+        };
         pieces.push(piece);
       }
       piece.text += node.data[index];

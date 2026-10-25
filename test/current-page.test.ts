@@ -22,7 +22,13 @@ describe("pageNearestCenter", () => {
   });
 
   it("with several whole pages visible, picks the one nearest the middle", () => {
-    const small = (n: number): PageBox => ({ page: n, left: 0, right: 300, top: (n - 1) * 210, bottom: (n - 1) * 210 + 200 });
+    const small = (n: number): PageBox => ({
+      page: n,
+      left: 0,
+      right: 300,
+      top: (n - 1) * 210,
+      bottom: (n - 1) * 210 + 200,
+    });
     const view = { left: 0, right: 300, top: 0, bottom: 800 };
     expect(pageNearestCenter([small(1), small(2), small(3), small(4)], view)).toBe(2);
   });
