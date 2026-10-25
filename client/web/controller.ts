@@ -8,6 +8,13 @@ import type {
   PDFViewer,
 } from "pdfjs-dist/web/pdf_viewer.mjs";
 import { SCOPE_CLASS } from "../css-scope";
+import {
+  type Box,
+  isPinHeld,
+  type PageBox,
+  type PinnedPage,
+  pageNearestCenter,
+} from "../current-page";
 import { isExternalLink } from "../links";
 import {
   defaultSavedView,
@@ -37,6 +44,8 @@ interface Layer {
   pdfViewer: PDFViewer;
   document: PDFDocumentProxy | null;
   location: ViewerLocation | null;
+  /** The page the viewer last moved to itself; current until the reader scrolls. */
+  pin: PinnedPage | null;
 }
 
 /** How long a rebuilt document may take to draw a page before it is shown anyway. */
@@ -73,6 +82,8 @@ class PdfViewerController implements ViewerController {
     null;
   private findQuery = "";
   private readonly area: AreaSelection;
+  /** Set while restoring a saved or rebuilt view, which is not a navigation. */
+  private restoring = false;
 
   constructor(private readonly options: CreateViewerControllerOptions) {
     const host = options.host as HTMLElement;
@@ -127,6 +138,8 @@ class PdfViewerController implements ViewerController {
     }
     const firstPageDrawn = once(layer.eventBus, "pagerendered");
     this.applyView(layer, target, pdfDocument.numPages);
+    const carried = previous && view === "current" ? this.heldPin(previous) : null;
+    if (carried) this.pin(layer, carried.page);
 
     let focus = false;
     if (previous) {
@@ -148,7 +161,7 @@ class PdfViewerController implements ViewerController {
     if (focus) layer.container.focus({ preventScroll: true });
     const callbacks = this.options.callbacks;
     callbacks.onDocument({ pageCount: pdfDocument.numPages });
-    callbacks.onPage(layer.pdfViewer.currentPageNumber);
+    callbacks.onPage(this.currentPage(layer));
     callbacks.onScale({
       scaleValue: layer.pdfViewer.currentScaleValue,
       scale: layer.pdfViewer.currentScale,
@@ -166,17 +179,19 @@ class PdfViewerController implements ViewerController {
   }
 
   setPage(page: number): void {
-    const viewer = this.current?.pdfViewer;
-    if (!viewer || !Number.isFinite(page)) return;
-    viewer.currentPageNumber = Math.min(Math.max(1, Math.round(page)), viewer.pagesCount);
+    const layer = this.current;
+    if (!layer || !Number.isFinite(page)) return;
+    const target = Math.min(Math.max(1, Math.round(page)), layer.pdfViewer.pagesCount);
+    layer.pdfViewer.currentPageNumber = target;
+    this.pin(layer, target);
   }
 
   previousPage(): void {
-    this.current?.pdfViewer.previousPage();
+    if (this.current) this.setPage(this.currentPage(this.current) - 1);
   }
 
   nextPage(): void {
-    this.current?.pdfViewer.nextPage();
+    if (this.current) this.setPage(this.currentPage(this.current) + 1);
   }
 
   zoomIn(): void {
@@ -308,6 +323,11 @@ class PdfViewerController implements ViewerController {
       annotationMode: runtime.lib.AnnotationMode.ENABLE,
     });
     linkService.setViewer(pdfViewer);
+    const scrollPageIntoView = pdfViewer.scrollPageIntoView.bind(pdfViewer);
+    pdfViewer.scrollPageIntoView = (params) => {
+      scrollPageIntoView(params);
+      if (!this.restoring) this.pin(layer, params.pageNumber);
+    };
     const layer: Layer = {
       container,
       eventBus,
@@ -316,6 +336,7 @@ class PdfViewerController implements ViewerController {
       pdfViewer,
       document: null,
       location: null,
+      pin: null,
     };
     this.listen(layer);
     container.addEventListener("wheel", (event) => this.onWheel(layer, event), { passive: false });
@@ -329,10 +350,9 @@ class PdfViewerController implements ViewerController {
     const isCurrent = () => this.current === layer;
     layer.eventBus.on("updateviewarea", ({ location }: { location: ViewerLocation }) => {
       layer.location = location;
-      if (isCurrent()) callbacks.onLocation(location);
-    });
-    layer.eventBus.on("pagechanging", ({ pageNumber }: { pageNumber: number }) => {
-      if (isCurrent()) callbacks.onPage(pageNumber);
+      if (!isCurrent()) return;
+      callbacks.onLocation(location);
+      callbacks.onPage(this.currentPage(layer));
     });
     layer.eventBus.on(
       "scalechanging",
@@ -381,6 +401,16 @@ class PdfViewerController implements ViewerController {
   }
 
   private applyView(layer: Layer, view: SavedView, pageCount: number): void {
+    this.restoring = true;
+    try {
+      this.restoreView(layer, view, pageCount);
+    } finally {
+      this.restoring = false;
+    }
+    layer.pin = null;
+  }
+
+  private restoreView(layer: Layer, view: SavedView, pageCount: number): void {
     const target = restoreTarget(view, pageCount);
     layer.pdfViewer.currentScaleValue = target.scaleValue;
     if (target.destArray) {
@@ -392,6 +422,37 @@ class PdfViewerController implements ViewerController {
     } else {
       layer.pdfViewer.currentPageNumber = target.pageNumber;
     }
+  }
+
+  /**
+   * The current page as Okular decides it: the page the viewer last moved to, until the reader
+   * scrolls, and otherwise the visible page whose center is nearest the view's center.
+   */
+  private currentPage(layer: Layer): number {
+    const pin = this.heldPin(layer);
+    if (pin) return pin.page;
+    layer.pin = null;
+    const container = layer.container;
+    const frame = container.getBoundingClientRect();
+    const view = {
+      left: frame.left + container.clientLeft,
+      top: frame.top + container.clientTop,
+      right: frame.left + container.clientLeft + container.clientWidth,
+      bottom: frame.top + container.clientTop + container.clientHeight,
+    };
+    return pageNearestCenter(visiblePageBoxes(layer.pdfViewer, view), view) ?? layer.pdfViewer.currentPageNumber;
+  }
+
+  private heldPin(layer: Layer): PinnedPage | null {
+    const { scrollLeft, scrollTop } = layer.container;
+    return isPinHeld(layer.pin, { scrollLeft, scrollTop }) ? layer.pin : null;
+  }
+
+  /** Records a move the viewer made itself; the scroll position it left behind is the pin. */
+  private pin(layer: Layer, page: number): void {
+    const { scrollLeft, scrollTop } = layer.container;
+    layer.pin = { page, scrollLeft, scrollTop };
+    if (layer === this.current) this.options.callbacks.onPage(page);
   }
 
   private currentView(): SavedView {
@@ -457,8 +518,8 @@ class PdfViewerController implements ViewerController {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     if (this.current !== layer || layer.pdfViewer.isHorizontalScrollbarEnabled) return;
     event.preventDefault();
-    if (event.key === "ArrowRight") layer.pdfViewer.nextPage();
-    else layer.pdfViewer.previousPage();
+    if (event.key === "ArrowRight") this.nextPage();
+    else this.previousPage();
   }
 
   private onPointerDown(layer: Layer, event: PointerEvent): void {
@@ -513,6 +574,36 @@ class PdfViewerController implements ViewerController {
     event.stopPropagation();
     this.options.callbacks.openExternal(href);
   };
+}
+
+/**
+ * The visible pages' drawing areas on screen, in document order. Scans outward from a page PDF.js
+ * knows is visible, so the cost follows the number of visible pages, not the document's length.
+ */
+function visiblePageBoxes(viewer: PDFViewer, view: Box): PageBox[] {
+  const boxOf = (page: number): PageBox | null => {
+    const div = (viewer.getPageView(page - 1) as { div?: HTMLDivElement } | undefined)?.div;
+    if (!div) return null;
+    const rect = div.getBoundingClientRect();
+    const left = rect.left + div.clientLeft;
+    const top = rect.top + div.clientTop;
+    return { page, left, top, right: left + div.clientWidth, bottom: top + div.clientHeight };
+  };
+  const isVisible = (box: PageBox | null): box is PageBox =>
+    box !== null && box.bottom > view.top && box.top < view.bottom && box.right > view.left && box.left < view.right;
+  const start = Math.min(Math.max(1, viewer.currentPageNumber), viewer.pagesCount);
+  const boxes: PageBox[] = [];
+  for (let page = start; page >= 1; page -= 1) {
+    const box = boxOf(page);
+    if (isVisible(box)) boxes.unshift(box);
+    else if (page !== start) break;
+  }
+  for (let page = start + 1; page <= viewer.pagesCount; page += 1) {
+    const box = boxOf(page);
+    if (!isVisible(box)) break;
+    boxes.push(box);
+  }
+  return boxes;
 }
 
 function isEditable(element: Element | null): boolean {
