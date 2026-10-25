@@ -52,11 +52,14 @@ export interface ViewerController {
   nextPage(): void;
   zoomIn(): void;
   zoomOut(): void;
-  setScale(scale: ScalePreset): void;
+  /** A preset or a numeric scale such as "1.25". */
+  setScale(scale: ScalePreset | string): void;
   find(query: string, options: { again: boolean; previous: boolean }): void;
   setInvert(invert: boolean): void;
   setTool(tool: Tool): void;
   setTheme(theme: PluginTheme): void;
+  /** Moves keyboard focus to the document, so arrow keys reach it. */
+  focus(): void;
   destroy(): void;
 }
 

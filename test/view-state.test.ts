@@ -6,6 +6,7 @@ import {
   savedViewSchema,
   scaleLabel,
   scaleValueFromLocation,
+  zoomMenuItems,
 } from "../client/view-state";
 
 describe("scaleValueFromLocation", () => {
@@ -73,5 +74,40 @@ describe("scaleLabel", () => {
     expect(scaleLabel("page-width", 1.3)).toBe("Fit width");
     expect(scaleLabel("auto", 0.853)).toBe("85%");
     expect(scaleLabel("1.25", 1.25)).toBe("125%");
+  });
+});
+
+describe("zoomMenuItems", () => {
+  const selected = (scaleValue: string) =>
+    zoomMenuItems(scaleValue)
+      .filter((item) => item.selected)
+      .map((item) => item.label);
+
+  it("lists the presets, then fixed levels after a divider", () => {
+    const items = zoomMenuItems("auto");
+    expect(items.map((item) => item.label)).toEqual([
+      "Automatic",
+      "Actual size",
+      "Fit page",
+      "Fit width",
+      "50%",
+      "75%",
+      "100%",
+      "125%",
+      "150%",
+      "200%",
+      "300%",
+      "400%",
+    ]);
+    expect(items.filter((item) => item.separated).map((item) => item.label)).toEqual(["50%"]);
+  });
+
+  it("checks the current preset or level", () => {
+    expect(selected("page-width")).toEqual(["Fit width"]);
+    expect(selected("1.25")).toEqual(["125%"]);
+  });
+
+  it("checks nothing for a zoom between levels, such as after a pinch", () => {
+    expect(selected("1.37")).toEqual([]);
   });
 });

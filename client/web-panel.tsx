@@ -26,7 +26,9 @@ import {
   scaleLabel,
   type Tool,
   type ViewerLocation,
+  zoomMenuItems,
 } from "./view-state";
+import { ZOOM_MENU_WIDTH, ZoomMenu } from "./zoom-menu";
 import type { CreateViewerController, FindStatus, ViewerController } from "./viewer-types";
 
 /**
@@ -50,6 +52,8 @@ export function WebPdfPanel({ file, tab, theme, layout }: PluginFilePanelProps) 
   const themeRef = useRef(theme);
   themeRef.current = theme;
 
+  const panel = useRef<View>(null);
+  const panelWidth = useRef(0);
   const host = useRef<View>(null);
   const viewer = useRef<ViewerController | null>(null);
   const reloads = useRef<ReloadScheduler | null>(null);
@@ -66,6 +70,7 @@ export function WebPdfPanel({ file, tab, theme, layout }: PluginFilePanelProps) 
   const [password, setPassword] = useState<{ incorrect: boolean } | null>(null);
   const [deleted, setDeleted] = useState(false);
   const [allowLarge, setAllowLarge] = useState(false);
+  const [zoomMenu, setZoomMenu] = useState<{ left: number; top: number } | null>(null);
   const tooLarge = file.size > LARGE_FILE_BYTES && !allowLarge;
 
   useLayoutEffect(() => {
@@ -171,12 +176,35 @@ export function WebPdfPanel({ file, tab, theme, layout }: PluginFilePanelProps) 
     [setSaved],
   );
   const retry = useCallback(() => reloads.current?.request(true), []);
+  const openZoomMenu = useCallback((anchor: View | null) => {
+    const container = panel.current;
+    if (!anchor || !container) return;
+    anchor.measureInWindow((x, y, _width, height) => {
+      container.measureInWindow((panelX, panelY) => {
+        const maxLeft = Math.max(0, panelWidth.current - ZOOM_MENU_WIDTH - 4);
+        setZoomMenu({ left: Math.min(Math.max(0, x - panelX), maxLeft), top: y - panelY + height + 4 });
+      });
+    });
+  }, []);
+  const closeZoomMenu = useCallback(() => setZoomMenu(null), []);
+  const chooseZoom = useCallback((value: string) => {
+    setZoomMenu(null);
+    viewer.current?.setScale(value);
+    viewer.current?.focus();
+  }, []);
+  useEscape(zoomMenu !== null, closeZoomMenu);
 
   const styles = useMemo(() => panelStyles(theme), [theme]);
   const status = statusMessage({ loaded, reload, deleted });
 
   return (
-    <View style={styles.panel}>
+    <View
+      ref={panel}
+      style={styles.panel}
+      onLayout={(event) => {
+        panelWidth.current = event.nativeEvent.layout.width;
+      }}
+    >
       <Toolbar
         theme={theme}
         compact={layout.compact}
@@ -187,6 +215,8 @@ export function WebPdfPanel({ file, tab, theme, layout }: PluginFilePanelProps) 
         onPreviousPage={() => viewer.current?.previousPage()}
         onNextPage={() => viewer.current?.nextPage()}
         scaleLabel={loaded ? scaleLabel(scale.scaleValue, scale.scale) : "–"}
+        zoomMenuOpen={zoomMenu !== null}
+        onOpenZoomMenu={openZoomMenu}
         onZoomIn={() => viewer.current?.zoomIn()}
         onZoomOut={() => viewer.current?.zoomOut()}
         onFitWidth={() => viewer.current?.setScale("page-width")}
@@ -233,8 +263,35 @@ export function WebPdfPanel({ file, tab, theme, layout }: PluginFilePanelProps) 
           />
         ) : null}
       </View>
+      {zoomMenu ? (
+        <ZoomMenu
+          theme={theme}
+          items={zoomMenuItems(scale.scaleValue)}
+          position={zoomMenu}
+          onSelect={chooseZoom}
+          onClose={closeZoomMenu}
+        />
+      ) : null}
     </View>
   );
+}
+
+/** Calls `onEscape` when Escape is pressed while `active`. The panel only renders on web. */
+function useEscape(active: boolean, onEscape: () => void): void {
+  useEffect(() => {
+    if (!active) return;
+    const target = globalThis as unknown as KeyEventTarget;
+    const onKeyDown = (event: { key: string }) => {
+      if (event.key === "Escape") onEscape();
+    };
+    target.addEventListener("keydown", onKeyDown);
+    return () => target.removeEventListener("keydown", onKeyDown);
+  }, [active, onEscape]);
+}
+
+interface KeyEventTarget {
+  addEventListener(type: "keydown", listener: (event: { key: string }) => void): void;
+  removeEventListener(type: "keydown", listener: (event: { key: string }) => void): void;
 }
 
 function statusMessage({

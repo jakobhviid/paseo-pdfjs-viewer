@@ -1,6 +1,6 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/ui";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { findStatusLabel } from "./find-label";
 import type { Tool } from "./view-state";
@@ -16,6 +16,9 @@ export interface ToolbarProps {
   onPreviousPage(): void;
   onNextPage(): void;
   scaleLabel: string;
+  zoomMenuOpen: boolean;
+  /** Opens the zoom menu under `anchor`, the zoom button. */
+  onOpenZoomMenu(anchor: View | null): void;
   onZoomIn(): void;
   onZoomOut(): void;
   onFitWidth(): void;
@@ -33,6 +36,7 @@ export interface ToolbarProps {
 export function Toolbar(props: ToolbarProps) {
   const { theme, disabled } = props;
   const styles = useMemo(() => toolbarStyles(theme), [theme]);
+  const zoomButton = useRef<View>(null);
   const [pageText, setPageText] = useState(String(props.page));
   useEffect(() => setPageText(String(props.page)), [props.page]);
   const submitPage = () => {
@@ -64,9 +68,24 @@ export function Toolbar(props: ToolbarProps) {
       </View>
       <View style={styles.group}>
         <IconButton theme={theme} icon="ZoomOut" label="Zoom out" disabled={disabled} onPress={props.onZoomOut} />
-        <Text style={[styles.label, styles.scale]} testID="pdfjs-scale">
-          {props.scaleLabel}
-        </Text>
+        <Pressable
+          ref={zoomButton}
+          accessibilityRole="button"
+          accessibilityLabel="Zoom level"
+          accessibilityState={{ disabled, expanded: props.zoomMenuOpen }}
+          disabled={disabled}
+          onPress={() => props.onOpenZoomMenu(zoomButton.current)}
+          testID="pdfjs-zoom-menu-button"
+          style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+            styles.zoomButton,
+            (pressed || hovered || props.zoomMenuOpen) && { backgroundColor: theme.colors.surface2 },
+          ]}
+        >
+          <Text style={[styles.label, styles.scale]} testID="pdfjs-scale">
+            {props.scaleLabel}
+          </Text>
+          <Icon name="ChevronDown" size={12} color={theme.colors.foregroundMuted} />
+        </Pressable>
         <IconButton theme={theme} icon="ZoomIn" label="Zoom in" disabled={disabled} onPress={props.onZoomIn} />
         {props.compact ? null : (
           <>
@@ -85,22 +104,29 @@ export function Toolbar(props: ToolbarProps) {
       )}
       <View style={[styles.group, styles.findGroup]}>
         <Icon name="Search" size={14} color={theme.colors.foregroundMuted} />
-        <TextInput
-          style={[styles.input, styles.findInput]}
-          value={props.findQuery}
-          onChangeText={props.onFindQuery}
-          onSubmitEditing={() => props.onFind(false)}
-          editable={!disabled}
-          placeholder="Find"
-          placeholderTextColor={theme.colors.foregroundMuted}
-          accessibilityLabel="Find in document"
-          testID="pdfjs-find-input"
-          // Keep focus after Enter so repeated Enter steps through matches.
-          blurOnSubmit={false}
-        />
-        <Text style={styles.muted} testID="pdfjs-find-status">
-          {findStatusLabel(props.find, props.findQuery)}
-        </Text>
+        <View style={styles.findField}>
+          <TextInput
+            style={[styles.input, styles.findInput]}
+            value={props.findQuery}
+            onChangeText={props.onFindQuery}
+            onSubmitEditing={() => props.onFind(false)}
+            editable={!disabled}
+            placeholder="Find"
+            placeholderTextColor={theme.colors.foregroundMuted}
+            accessibilityLabel="Find in document"
+            testID="pdfjs-find-input"
+            // Keep focus after Enter so repeated Enter steps through matches.
+            blurOnSubmit={false}
+          />
+          {/* Inside the field, as in Chrome's find bar, so counts do not reflow the toolbar. */}
+          <Text
+            style={[styles.muted, styles.findStatus]}
+            testID="pdfjs-find-status"
+            pointerEvents="none"
+          >
+            {findStatusLabel(props.find, props.findQuery)}
+          </Text>
+        </View>
         <IconButton theme={theme} icon="ChevronUp" label="Previous match" disabled={disabled || !props.findQuery} onPress={() => props.onFind(true)} />
         <IconButton theme={theme} icon="ChevronDown" label="Next match" disabled={disabled || !props.findQuery} onPress={() => props.onFind(false)} />
       </View>
@@ -145,7 +171,7 @@ function toolbarStyles(theme: PluginTheme) {
       flexDirection: "row" as const,
       flexWrap: "wrap" as const,
       alignItems: "center" as const,
-      columnGap: 12,
+      columnGap: 8,
       rowGap: 4,
       paddingHorizontal: 8,
       paddingVertical: 4,
@@ -154,7 +180,25 @@ function toolbarStyles(theme: PluginTheme) {
       borderBottomColor: theme.colors.border,
     },
     group: { flexDirection: "row" as const, alignItems: "center" as const, gap: 2 },
-    findGroup: { flexGrow: 1, justifyContent: "flex-end" as const, gap: 4 },
+    // Starts narrow and grows into the space left on the row, so the toolbar wraps only when
+    // the panel is genuinely narrow.
+    // An explicit basis: with "auto" the browser sizes the group from the <input>'s preferred
+    // width (20 characters), and the group wraps to its own row long before it has to.
+    findGroup: {
+      flexGrow: 1,
+      flexBasis: 190,
+      minWidth: 0,
+      justifyContent: "flex-end" as const,
+      gap: 4,
+    },
+    findField: {
+      flexGrow: 1,
+      flexBasis: 110,
+      minWidth: 0,
+      maxWidth: 240,
+      justifyContent: "center" as const,
+    },
+    findStatus: { position: "absolute" as const, right: 8, fontSize: 12 },
     input: {
       color: theme.colors.foreground,
       backgroundColor: theme.colors.surface1,
@@ -166,9 +210,17 @@ function toolbarStyles(theme: PluginTheme) {
       fontSize: 13,
     },
     pageInput: { width: 48, textAlign: "center" as const },
-    findInput: { width: 160 },
+    findInput: { width: "100%" as const, minWidth: 0, paddingRight: 64 },
     label: { color: theme.colors.foreground, fontSize: 13 },
-    scale: { minWidth: 72, textAlign: "center" as const },
+    scale: { minWidth: 64, textAlign: "center" as const },
+    zoomButton: {
+      flexDirection: "row" as const,
+      alignItems: "center" as const,
+      gap: 2,
+      paddingVertical: 4,
+      paddingHorizontal: 6,
+      borderRadius: 6,
+    },
     muted: { color: theme.colors.foregroundMuted, fontSize: 13 },
   };
 }

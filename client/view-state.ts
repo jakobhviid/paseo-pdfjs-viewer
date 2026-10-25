@@ -101,3 +101,35 @@ export function scaleLabel(scaleValue: string, effectiveScale: number): string {
   if (isScalePreset(scaleValue) && scaleValue !== "auto") return PRESET_LABELS[scaleValue];
   return `${Math.round(effectiveScale * 100)}%`;
 }
+
+/** Fixed zoom levels in the zoom menu, as in Firefox's and Chrome's PDF viewers. */
+export const ZOOM_LEVELS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4] as const;
+
+export interface ZoomMenuItem {
+  /** A preset, or a numeric scale such as "1.25", for `PDFViewer.currentScaleValue`. */
+  value: string;
+  label: string;
+  selected: boolean;
+  /** Draw a divider above this item. */
+  separated: boolean;
+}
+
+/** The zoom menu: the four presets, then fixed levels, with the current one checked. */
+export function zoomMenuItems(currentScaleValue: string): ZoomMenuItem[] {
+  const current = Number(currentScaleValue);
+  // Firefox's order.
+  const order: ScalePreset[] = ["auto", "page-actual", "page-fit", "page-width"];
+  const presets = order.map((value) => ({
+    value,
+    label: PRESET_LABELS[value],
+    selected: value === currentScaleValue,
+    separated: false,
+  }));
+  const levels = ZOOM_LEVELS.map((level, index) => ({
+    value: String(level),
+    label: `${Math.round(level * 100)}%`,
+    selected: Math.abs(current - level) < 1e-6,
+    separated: index === 0,
+  }));
+  return [...presets, ...levels];
+}

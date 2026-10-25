@@ -102,32 +102,33 @@ class PdfViewerController implements ViewerController {
     // Capture the reader's place before the new document replaces anything.
     const target = view === "current" ? this.currentView() : view;
 
-    let document: PDFDocumentProxy;
+    let pdfDocument: PDFDocumentProxy;
     try {
-      document = await this.loadDocument(runtime, bytes);
+      pdfDocument = await this.loadDocument(runtime, bytes);
     } catch (error) {
       if (this.isStale(sequence)) return;
       throw error;
     }
     if (this.isStale(sequence)) {
-      void document.loadingTask.destroy();
+      void pdfDocument.loadingTask.destroy();
       return;
     }
 
     const previous = this.current;
     const layer = this.createLayer(runtime, previous !== null);
-    layer.document = document;
+    layer.document = pdfDocument;
     const pagesInit = once(layer.eventBus, "pagesinit");
-    layer.pdfViewer.setDocument(document);
-    layer.linkService.setDocument(document, null);
+    layer.pdfViewer.setDocument(pdfDocument);
+    layer.linkService.setDocument(pdfDocument, null);
     await pagesInit;
     if (this.isStale(sequence)) {
       this.destroyLayer(layer);
       return;
     }
     const firstPageDrawn = once(layer.eventBus, "pagerendered");
-    this.applyView(layer, target, document.numPages);
+    this.applyView(layer, target, pdfDocument.numPages);
 
+    let focus = false;
     if (previous) {
       // Keep showing the old document until the new one has drawn, so a rebuild does not flash.
       await Promise.race([firstPageDrawn, delay(SWAP_TIMEOUT_MS)]);
@@ -135,12 +136,18 @@ class PdfViewerController implements ViewerController {
         this.destroyLayer(layer);
         return;
       }
+      // Keyboard navigation keeps working across rebuilds.
+      focus = previous.container.contains(document.activeElement);
       this.destroyLayer(previous);
+    } else {
+      // Arrow keys work as soon as a document opens, unless the user is typing somewhere.
+      focus = !isEditable(document.activeElement);
     }
     layer.container.classList.remove(PENDING_CLASS);
     this.current = layer;
+    if (focus) layer.container.focus({ preventScroll: true });
     const callbacks = this.options.callbacks;
-    callbacks.onDocument({ pageCount: document.numPages });
+    callbacks.onDocument({ pageCount: pdfDocument.numPages });
     callbacks.onPage(layer.pdfViewer.currentPageNumber);
     callbacks.onScale({
       scaleValue: layer.pdfViewer.currentScaleValue,
@@ -180,7 +187,7 @@ class PdfViewerController implements ViewerController {
     this.current?.pdfViewer.decreaseScale();
   }
 
-  setScale(scale: ScalePreset): void {
+  setScale(scale: ScalePreset | string): void {
     if (this.current) this.current.pdfViewer.currentScaleValue = scale;
   }
 
@@ -224,6 +231,10 @@ class PdfViewerController implements ViewerController {
     this.root.style.setProperty("--paseo-pdfjs-hover", colors.surface2);
     this.root.style.setProperty("--paseo-pdfjs-border", colors.border);
     this.root.style.setProperty("--paseo-pdfjs-foreground", colors.foreground);
+  }
+
+  focus(): void {
+    this.current?.container.focus({ preventScroll: true });
   }
 
   destroy(): void {
@@ -309,12 +320,7 @@ class PdfViewerController implements ViewerController {
     this.listen(layer);
     container.addEventListener("wheel", (event) => this.onWheel(layer, event), { passive: false });
     container.addEventListener("pointerdown", (event) => this.onPointerDown(layer, event));
-    container.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && this.area.active) {
-        event.preventDefault();
-        this.area.clear();
-      }
-    });
+    container.addEventListener("keydown", (event) => this.onKeyDown(layer, event));
     return layer;
   }
 
@@ -437,6 +443,24 @@ class PdfViewerController implements ViewerController {
     }
   }
 
+  /**
+   * Left and Right turn whole pages when the page fits the width, as in Firefox's, Chrome's, and
+   * Okular's viewers; zoomed in further, they scroll sideways as usual. The jump is immediate.
+   */
+  private onKeyDown(layer: Layer, event: KeyboardEvent): void {
+    if (event.key === "Escape" && this.area.active) {
+      event.preventDefault();
+      this.area.clear();
+      return;
+    }
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    if (this.current !== layer || layer.pdfViewer.isHorizontalScrollbarEnabled) return;
+    event.preventDefault();
+    if (event.key === "ArrowRight") layer.pdfViewer.nextPage();
+    else layer.pdfViewer.previousPage();
+  }
+
   private onPointerDown(layer: Layer, event: PointerEvent): void {
     if (this.current !== layer) return;
     if (this.tool === "hand") this.startPan(layer, event);
@@ -489,6 +513,12 @@ class PdfViewerController implements ViewerController {
     event.stopPropagation();
     this.options.callbacks.openExternal(href);
   };
+}
+
+function isEditable(element: Element | null): boolean {
+  if (!element) return false;
+  if ((element as HTMLElement).isContentEditable) return true;
+  return element.matches("input, textarea, select");
 }
 
 function once(eventBus: EventBus, name: string): Promise<void> {
