@@ -3,6 +3,14 @@
   "private": true,
   "version": "0.1.0",
   "description": "View PDFs in Paseo's file tab with PDF.js: text selection, search, links, live reload that keeps your place.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bendavid/paseo-pdfjs-viewer.git"
+  },
+  "homepage": "https://github.com/bendavid/paseo-pdfjs-viewer#readme",
+  "bugs": {
+    "url": "https://github.com/bendavid/paseo-pdfjs-viewer/issues"
+  },
   "license": "MIT",
   "type": "module",
   "files": [

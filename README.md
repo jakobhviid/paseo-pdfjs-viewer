@@ -5,6 +5,8 @@ A [Paseo](https://paseo.sh) plugin that opens `.pdf` files in the file tab with
 that keeps your place when a build rewrites the PDF. See [OVERVIEW.md](OVERVIEW.md) for what it
 does from a user's point of view.
 
+![The viewer in Paseo's file tab](assets/screenshot-light.png)
+
 Requires Paseo 0.13.0 or later (file panels). Runs in the desktop app and the web app; the iOS
 and Android apps show a message instead.
 
@@ -21,7 +23,7 @@ From Git (Paseo runs the `build` steps in paseo-plugin.json on the daemon host, 
 and `node` on its PATH):
 
 ```sh
-paseo plugin add git:<owner>/paseo-pdfjs-viewer
+paseo plugin add git:bendavid/paseo-pdfjs-viewer
 ```
 
 Open a `.pdf` from Files. If another plugin also handles PDFs, Paseo asks which one to use; change
