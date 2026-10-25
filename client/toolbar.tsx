@@ -80,6 +80,7 @@ export function Toolbar(props: ToolbarProps) {
         <View style={styles.group}>
           <IconButton theme={theme} icon="TextCursor" label="Select text" selected={props.tool === "select"} disabled={disabled} onPress={() => props.onTool("select")} />
           <IconButton theme={theme} icon="Hand" label="Hand tool" selected={props.tool === "hand"} disabled={disabled} onPress={() => props.onTool("hand")} />
+          <IconButton theme={theme} icon="SquareDashedMousePointer" label="Select area" selected={props.tool === "area"} disabled={disabled} onPress={() => props.onTool("area")} />
         </View>
       )}
       <View style={[styles.group, styles.findGroup]}>

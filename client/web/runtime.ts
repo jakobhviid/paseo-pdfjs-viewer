@@ -71,6 +71,25 @@ const OWN_CSS = `
 .${SCOPE_CLASS}.paseo-pdfjs-hand .textLayer * { cursor: grab; user-select: none; -webkit-user-select: none; }
 .${SCOPE_CLASS}.paseo-pdfjs-grabbing .paseo-pdfjs-container,
 .${SCOPE_CLASS}.paseo-pdfjs-grabbing .paseo-pdfjs-container * { cursor: grabbing !important; }
+.${SCOPE_CLASS}.paseo-pdfjs-area .paseo-pdfjs-container,
+.${SCOPE_CLASS}.paseo-pdfjs-area .textLayer * { cursor: crosshair; user-select: none; -webkit-user-select: none; }
+.${SCOPE_CLASS} .paseo-pdfjs-area-rect {
+  position: absolute; z-index: 30; pointer-events: none; box-sizing: border-box;
+  border: 1px dashed var(--paseo-pdfjs-accent);
+  background: color-mix(in srgb, var(--paseo-pdfjs-accent) 14%, transparent);
+}
+.${SCOPE_CLASS} .paseo-pdfjs-area-actions {
+  position: absolute; z-index: 31; display: flex; gap: 2px; padding: 3px; cursor: default;
+  border-radius: 8px; border: 1px solid var(--paseo-pdfjs-border);
+  background: var(--paseo-pdfjs-surface); box-shadow: 0 4px 14px rgb(0 0 0 / 0.18);
+  font: 12px/1.2 system-ui, sans-serif;
+}
+.${SCOPE_CLASS} .paseo-pdfjs-area-actions button {
+  all: unset; cursor: pointer; padding: 5px 9px; border-radius: 5px; white-space: nowrap;
+  color: var(--paseo-pdfjs-foreground);
+}
+.${SCOPE_CLASS} .paseo-pdfjs-area-actions button:hover,
+.${SCOPE_CLASS} .paseo-pdfjs-area-actions button:focus-visible { background: var(--paseo-pdfjs-hover); }
 `;
 
 /**

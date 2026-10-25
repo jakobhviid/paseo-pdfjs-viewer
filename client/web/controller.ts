@@ -25,6 +25,7 @@ import type {
   OpenOptions,
   ViewerController,
 } from "../viewer-types";
+import { AreaSelection } from "./area-selection";
 import { binaryDataFactoryFor, loadPdfjsRuntime, type PdfjsRuntime } from "./runtime";
 
 /** One loaded document in its own scroll container. A rebuild loads into a new layer. */
@@ -43,6 +44,7 @@ const SWAP_TIMEOUT_MS = 2000;
 const PENDING_CLASS = "paseo-pdfjs-pending";
 const INVERT_CLASS = "paseo-pdfjs-invert";
 const HAND_CLASS = "paseo-pdfjs-hand";
+const AREA_CLASS = "paseo-pdfjs-area";
 const GRABBING_CLASS = "paseo-pdfjs-grabbing";
 /** Where a hand-tool drag must not start, as in PDF.js's grab-to-pan: links and form controls. */
 const HAND_IGNORE = "a[href], a[href] *, input, textarea, button, button *, select, option";
@@ -70,6 +72,7 @@ class PdfViewerController implements ViewerController {
   private passwordTask: { task: PDFDocumentLoadingTask; update: (password: string) => void } | null =
     null;
   private findQuery = "";
+  private readonly area: AreaSelection;
 
   constructor(private readonly options: CreateViewerControllerOptions) {
     const host = options.host as HTMLElement;
@@ -77,6 +80,7 @@ class PdfViewerController implements ViewerController {
     this.root.className = SCOPE_CLASS;
     Object.assign(this.root.style, { position: "absolute", inset: "0", overflow: "hidden" });
     host.appendChild(this.root);
+    this.area = new AreaSelection({ notify: options.callbacks.onNotice });
     this.invert = options.invert;
     this.setInvert(options.invert);
     this.tool = options.tool;
@@ -200,10 +204,26 @@ class PdfViewerController implements ViewerController {
   setTool(tool: Tool): void {
     this.tool = tool;
     this.root.classList.toggle(HAND_CLASS, tool === "hand");
+    this.root.classList.toggle(AREA_CLASS, tool === "area");
+    this.area.clear();
+    // Only the select tool works with a text selection; drop one made in this viewer.
+    if (tool !== "select") {
+      const selection = window.getSelection();
+      if (selection?.anchorNode && this.root.contains(selection.anchorNode)) {
+        selection.removeAllRanges();
+      }
+    }
   }
 
   setTheme(theme: PluginTheme): void {
-    this.root.style.backgroundColor = theme.colors.surface1;
+    const { colors } = theme;
+    this.root.style.backgroundColor = colors.surface1;
+    // Colors for the area tool's rectangle and Copy bar, which are drawn in the DOM.
+    this.root.style.setProperty("--paseo-pdfjs-accent", colors.accent);
+    this.root.style.setProperty("--paseo-pdfjs-surface", colors.surface0);
+    this.root.style.setProperty("--paseo-pdfjs-hover", colors.surface2);
+    this.root.style.setProperty("--paseo-pdfjs-border", colors.border);
+    this.root.style.setProperty("--paseo-pdfjs-foreground", colors.foreground);
   }
 
   destroy(): void {
@@ -211,6 +231,7 @@ class PdfViewerController implements ViewerController {
     this.openSequence += 1;
     this.resizeObserver.disconnect();
     this.root.removeEventListener("click", this.onClick, true);
+    this.area.clear();
     void this.passwordTask?.task.destroy();
     this.passwordTask = null;
     if (this.current) this.destroyLayer(this.current);
@@ -288,6 +309,12 @@ class PdfViewerController implements ViewerController {
     this.listen(layer);
     container.addEventListener("wheel", (event) => this.onWheel(layer, event), { passive: false });
     container.addEventListener("pointerdown", (event) => this.onPointerDown(layer, event));
+    container.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && this.area.active) {
+        event.preventDefault();
+        this.area.clear();
+      }
+    });
     return layer;
   }
 
@@ -304,7 +331,10 @@ class PdfViewerController implements ViewerController {
     layer.eventBus.on(
       "scalechanging",
       ({ scale, presetValue }: { scale: number; presetValue?: string }) => {
-        if (isCurrent()) callbacks.onScale({ scaleValue: presetValue ?? String(scale), scale });
+        if (!isCurrent()) return;
+        // A marked area belongs to the old scale's geometry.
+        this.area.clear();
+        callbacks.onScale({ scaleValue: presetValue ?? String(scale), scale });
       },
     );
     const reportFind = (
@@ -372,6 +402,7 @@ class PdfViewerController implements ViewerController {
   }
 
   private destroyLayer(layer: Layer): void {
+    if (layer === this.current) this.area.clear();
     layer.pdfViewer.setDocument(null);
     layer.linkService.setDocument(null);
     void layer.document?.loadingTask.destroy();
@@ -406,12 +437,17 @@ class PdfViewerController implements ViewerController {
     }
   }
 
+  private onPointerDown(layer: Layer, event: PointerEvent): void {
+    if (this.current !== layer) return;
+    if (this.tool === "hand") this.startPan(layer, event);
+    else if (this.tool === "area") this.area.begin(layer.container, layer.pdfViewer, event);
+  }
+
   /**
    * The hand tool pans by dragging with the mouse. Touch and pen keep the browser's own panning,
    * and links and form controls stay clickable because a drag never starts on them.
    */
-  private onPointerDown(layer: Layer, event: PointerEvent): void {
-    if (this.tool !== "hand" || this.current !== layer) return;
+  private startPan(layer: Layer, event: PointerEvent): void {
     if (event.pointerType !== "mouse" || event.button !== 0) return;
     if ((event.target as Element | null)?.closest?.(HAND_IGNORE)) return;
     const container = layer.container;

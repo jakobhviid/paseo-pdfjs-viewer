@@ -4,7 +4,7 @@ import {
   useRpc,
   useTabState,
 } from "@getpaseo/plugin/client";
-import { Loading } from "@getpaseo/plugin/client/ui";
+import { Loading, useToast } from "@getpaseo/plugin/client/ui";
 import {
   type ReactNode,
   useCallback,
@@ -41,6 +41,9 @@ const IDLE_FIND: FindStatus = { query: "", current: 0, total: 0, state: "idle" }
 export function WebPdfPanel({ file, tab, theme, layout }: PluginFilePanelProps) {
   const fetchRuntimePart = useRpc(runtimePart);
   const fetchBinaryData = useRpc(binaryData);
+  const toast = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
   const [saved, setSaved] = useTabState(tab, savedViewSchema, defaultSavedView);
   const savedRef = useRef(saved);
   savedRef.current = saved;
@@ -93,6 +96,10 @@ export function WebPdfPanel({ file, tab, theme, layout }: PluginFilePanelProps) 
         onLocation: saveLocation,
         onFind: setFind,
         onPassword: (incorrect) => setPassword({ incorrect }),
+        onNotice: (message, tone) => {
+          if (tone === "error") toastRef.current.error(message);
+          else toastRef.current.show(message);
+        },
         openExternal: (url) => {
           void openExternalUrl(url).catch((error: unknown) => {
             console.warn(`Could not open ${url}: ${messageOf(error)}`);

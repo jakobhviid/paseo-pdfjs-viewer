@@ -4,8 +4,8 @@ import { z } from "zod";
 export const SCALE_PRESETS = ["auto", "page-width", "page-fit", "page-actual"] as const;
 export type ScalePreset = (typeof SCALE_PRESETS)[number];
 
-/** Dragging selects text, or pans the page like PDF.js's hand tool. */
-export const TOOLS = ["select", "hand"] as const;
+/** What dragging does: select text, pan the page (hand), or mark an area to copy. */
+export const TOOLS = ["select", "hand", "area"] as const;
 export type Tool = (typeof TOOLS)[number];
 
 /**

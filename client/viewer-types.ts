@@ -31,6 +31,8 @@ export interface ViewerCallbacks {
   onFind(status: FindStatus): void;
   /** The document needs a password; `incorrect` is true after a wrong one. */
   onPassword(incorrect: boolean): void;
+  /** A short message for the user, such as "Copied image." */
+  onNotice(message: string, tone: "info" | "error"): void;
   openExternal(url: string): void;
 }
 
