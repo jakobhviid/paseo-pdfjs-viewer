@@ -16,6 +16,7 @@ import {
   pageNearestCenter,
 } from "../current-page";
 import { isExternalLink } from "../links";
+import { pagingKey, WheelPageFlip } from "../page-flip";
 import {
   defaultSavedView,
   restoreTarget,
@@ -77,6 +78,10 @@ class PdfViewerController implements ViewerController {
   private destroyed = false;
   private invert: boolean;
   private tool: Tool;
+  private continuous: boolean;
+  /** Set once the PDF.js runtime has loaded. */
+  private runtime: PdfjsRuntime | null = null;
+  private readonly wheelFlip = new WheelPageFlip();
   private password: string | undefined;
   private passwordTask: {
     task: PDFDocumentLoadingTask;
@@ -99,6 +104,7 @@ class PdfViewerController implements ViewerController {
     this.setInvert(options.invert);
     this.tool = options.tool;
     this.setTool(options.tool);
+    this.continuous = options.continuous;
     this.setTheme(options.theme);
     this.root.addEventListener("click", this.onClick, true);
     this.root.addEventListener("focusout", this.onFocusOut);
@@ -116,6 +122,7 @@ class PdfViewerController implements ViewerController {
     this.passwordTask = null;
     const runtime = await loadPdfjsRuntime(this.options.fetchRuntimePart);
     if (this.isStale(sequence)) return;
+    this.runtime = runtime;
     // Capture the reader's place before the new document replaces anything.
     const target = view === "current" ? this.currentView() : view;
 
@@ -243,6 +250,25 @@ class PdfViewerController implements ViewerController {
     }
   }
 
+  /**
+   * Switches between all pages in one scroll and one page at a time, keeping the current page.
+   * Within that page the view stays where it was when the page's top-left corner is in view.
+   */
+  setContinuous(continuous: boolean): void {
+    this.continuous = continuous;
+    const layer = this.current;
+    if (!layer || !this.runtime) return;
+    const page = this.currentPage(layer);
+    const view = this.currentView();
+    layer.pdfViewer.scrollMode = scrollModeFor(this.runtime, continuous);
+    this.applyView(
+      layer,
+      view.page === page ? view : { ...view, page, left: null, top: null },
+      layer.pdfViewer.pagesCount,
+    );
+    this.pin(layer, page);
+  }
+
   setTheme(theme: PluginTheme): void {
     const { colors } = theme;
     this.root.style.backgroundColor = colors.surface1;
@@ -330,6 +356,8 @@ class PdfViewerController implements ViewerController {
       // Render links and annotations; leave form editing off, since nothing could save it.
       annotationMode: runtime.lib.AnnotationMode.ENABLE,
     });
+    // Before the document arrives, so it opens in the right mode.
+    pdfViewer.scrollMode = scrollModeFor(runtime, this.continuous);
     linkService.setViewer(pdfViewer);
     const scrollPageIntoView = pdfViewer.scrollPageIntoView.bind(pdfViewer);
     pdfViewer.scrollPageIntoView = (params) => {
@@ -445,6 +473,8 @@ class PdfViewerController implements ViewerController {
    * scrolls, and otherwise the visible page whose center is nearest the view's center.
    */
   private currentPage(layer: Layer): number {
+    // One page at a time: the page on screen.
+    if (!this.continuous) return layer.pdfViewer.currentPageNumber;
     const pin = this.heldPin(layer);
     if (pin) return pin.page;
     layer.pin = null;
@@ -476,7 +506,7 @@ class PdfViewerController implements ViewerController {
 
   private currentView(): SavedView {
     const layer = this.current;
-    const preferences = { invert: this.invert, tool: this.tool };
+    const preferences = { invert: this.invert, tool: this.tool, continuous: this.continuous };
     if (!layer) return { ...defaultSavedView, ...preferences };
     if (layer.location) return savedViewFromLocation(layer.location, preferences);
     return {
@@ -507,10 +537,26 @@ class PdfViewerController implements ViewerController {
 
   /**
    * Ctrl+wheel zooms around the pointer, as in PDF.js's own viewer. Trackpad pinches arrive as
-   * many small pixel deltas and scale smoothly; a mouse wheel notch is one zoom step.
+   * many small pixel deltas and scale smoothly; a mouse wheel notch is one zoom step. One page at
+   * a time, the wheel scrolls within the page and turns it at the edge, as in Okular.
    */
   private onWheel(layer: Layer, event: WheelEvent): void {
-    if (!(event.ctrlKey || event.metaKey) || this.current !== layer || event.deltaY === 0) return;
+    if (this.current !== layer || event.deltaY === 0) return;
+    if (!(event.ctrlKey || event.metaKey)) {
+      if (this.continuous || event.altKey || event.shiftKey) return;
+      const edge = pageEdges(layer);
+      const flip = this.wheelFlip.push({
+        deltaY: event.deltaY,
+        deltaMode: event.deltaMode,
+        ...edge,
+      });
+      // At the edge nothing is left to scroll; keep the wheel from scrolling anything else.
+      if ((event.deltaY > 0 && edge.atBottom) || (event.deltaY < 0 && edge.atTop)) {
+        event.preventDefault();
+      }
+      if (flip) this.turnPage(layer, flip === "next" ? "down" : "up");
+      return;
+    }
     event.preventDefault();
     const origin = [event.clientX, event.clientY];
     const scaleFactor = Math.exp(-event.deltaY / 100);
@@ -537,9 +583,19 @@ class PdfViewerController implements ViewerController {
       this.area.clear();
       return;
     }
+    const target = event.target as Element | null;
+    const paging = this.continuous ? null : pagingKey(event);
+    // Only from the document itself: on a toolbar button, Space presses the button.
+    if (paging && target && layer.container.contains(target) && !isEditable(target)) {
+      const edge = pageEdges(layer);
+      if (paging === "down" ? edge.atBottom : edge.atTop) {
+        event.preventDefault();
+        this.turnPage(layer, paging);
+      }
+      return;
+    }
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    const target = event.target as Element | null;
     // Text fields use arrows to move the caret; an open menu (the zoom menu) owns the keys.
     if (isEditable(target) || this.keyboardScope.querySelector("[role='menu']")) return;
     if (layer.pdfViewer.isHorizontalScrollbarEnabled) {
@@ -550,6 +606,21 @@ class PdfViewerController implements ViewerController {
     if (event.key === "ArrowRight") this.nextPage();
     else this.previousPage();
   };
+
+  /**
+   * One page at a time, scrolling past an edge turns the page, as in Okular: down shows the top
+   * of the next page, up the bottom of the previous one.
+   */
+  private turnPage(layer: Layer, direction: "down" | "up"): void {
+    const page = layer.pdfViewer.currentPageNumber;
+    if (direction === "down") {
+      if (page < layer.pdfViewer.pagesCount) this.setPage(page + 1);
+      return;
+    }
+    if (page <= 1) return;
+    this.setPage(page - 1);
+    layer.container.scrollTop = layer.container.scrollHeight;
+  }
 
   /**
    * When the focused element inside the viewer is removed (the area tool's Copy bar after a copy,
@@ -627,7 +698,7 @@ class PdfViewerController implements ViewerController {
 function visiblePageBoxes(viewer: PDFViewer, view: Box): PageBox[] {
   const boxOf = (page: number): PageBox | null => {
     const div = (viewer.getPageView(page - 1) as { div?: HTMLDivElement } | undefined)?.div;
-    if (!div) return null;
+    if (!div?.isConnected) return null;
     const rect = div.getBoundingClientRect();
     const left = rect.left + div.clientLeft;
     const top = rect.top + div.clientTop;
@@ -652,6 +723,29 @@ function visiblePageBoxes(viewer: PDFViewer, view: Box): PageBox[] {
     boxes.push(box);
   }
   return boxes;
+}
+
+function scrollModeFor(runtime: PdfjsRuntime, continuous: boolean): number {
+  const { ScrollMode } = runtime.viewer;
+  return continuous ? ScrollMode.VERTICAL : ScrollMode.PAGE;
+}
+
+/**
+ * Whether the top and bottom of the page on screen are in view. Measured on the drawn page, not
+ * the scroll range: PDF.js's page border overflows the view a little even at "Fit page".
+ */
+function pageEdges(layer: Layer): { atTop: boolean; atBottom: boolean } {
+  const viewer = layer.pdfViewer;
+  const div = (viewer.getPageView(viewer.currentPageNumber - 1) as { div?: HTMLDivElement })?.div;
+  const container = layer.container;
+  if (!div) return { atTop: true, atBottom: true };
+  const frame = container.getBoundingClientRect();
+  const viewTop = frame.top + container.clientTop;
+  const pageTop = div.getBoundingClientRect().top + div.clientTop;
+  return {
+    atTop: pageTop >= viewTop - 1,
+    atBottom: pageTop + div.clientHeight <= viewTop + container.clientHeight + 1,
+  };
 }
 
 function isEditable(element: Element | null): boolean {

@@ -8,6 +8,7 @@ What you can do in the viewer:
 - Search the document, with a match count and highlighting.
 - Move by page, choose a zoom level from the zoom menu (automatic, actual size, fit page, fit width, or 50% to 400%), or pinch and Ctrl+scroll to zoom.
 - Turn pages with the Left and Right arrow keys when the whole page width is visible, as in Okular. Zoomed in further, they scroll sideways. The current page, shown in the page box, is the page you last jumped to until you scroll, and otherwise the page nearest the middle of the view, also as in Okular.
+- Turn off continuous mode to see one page at a time, as in Okular. Scrolling or pressing Down, Page Down, or Space past the bottom of a page shows the top of the next one; scrolling up past the top shows the bottom of the previous one. The tab remembers the setting.
 - Choose what dragging does: select text, pan the page with the hand tool, or mark an area. An area can be copied to the clipboard as text or as an image rendered at twice the screen's resolution. The tab remembers which tool you used.
 - Invert page colors for reading in a dark theme.
 - Open password-protected PDFs. The password is kept in memory only, never saved, and reused when the file is rebuilt.

@@ -22,6 +22,8 @@ export const savedViewSchema = z.object({
   // Defaults keep tabs saved before a preference existed valid, along with their position.
   invert: z.boolean().default(false),
   tool: z.enum(TOOLS).default("select"),
+  /** Okular's Continuous setting: all pages in one scroll, or one page at a time. */
+  continuous: z.boolean().default(true),
 });
 export type SavedView = z.infer<typeof savedViewSchema>;
 
@@ -32,6 +34,7 @@ export const defaultSavedView: SavedView = {
   top: null,
   invert: false,
   tool: "select",
+  continuous: true,
 };
 
 /** What PDF.js reports in `updateviewarea`: a percentage for numeric scales, else the preset. */
@@ -54,11 +57,11 @@ export function scaleValueFromLocation(scale: number | string): string {
 }
 
 /** View preferences that ride along with the position. */
-export type ViewPreferences = Pick<SavedView, "invert" | "tool">;
+export type ViewPreferences = Pick<SavedView, "invert" | "tool" | "continuous">;
 
 export function savedViewFromLocation(
   location: ViewerLocation,
-  { invert, tool }: ViewPreferences,
+  { invert, tool, continuous }: ViewPreferences,
 ): SavedView {
   return {
     page: Math.max(1, Math.round(location.pageNumber)),
@@ -67,6 +70,7 @@ export function savedViewFromLocation(
     top: Number.isFinite(location.top) ? Math.round(location.top) : null,
     invert,
     tool,
+    continuous,
   };
 }
 

@@ -57,6 +57,8 @@ export interface ViewerController {
   find(query: string, options: { again: boolean; previous: boolean }): void;
   setInvert(invert: boolean): void;
   setTool(tool: Tool): void;
+  /** All pages in one scroll, or one page at a time. */
+  setContinuous(continuous: boolean): void;
   setTheme(theme: PluginTheme): void;
   /** Moves keyboard focus to the document, so arrow keys reach it. */
   focus(): void;
@@ -74,6 +76,7 @@ export interface CreateViewerControllerOptions {
   theme: PluginTheme;
   invert: boolean;
   tool: Tool;
+  continuous: boolean;
   fetchRuntimePart: FetchRuntimePart;
   fetchBinaryData: FetchBinaryData;
   callbacks: ViewerCallbacks;

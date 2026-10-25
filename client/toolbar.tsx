@@ -32,6 +32,8 @@ export interface ToolbarProps {
   onInvert(): void;
   tool: Tool;
   onTool(tool: Tool): void;
+  continuous: boolean;
+  onContinuous(): void;
 }
 
 export function Toolbar(props: ToolbarProps) {
@@ -144,6 +146,19 @@ export function Toolbar(props: ToolbarProps) {
               label="Fit page"
               disabled={disabled}
               onPress={props.onFitPage}
+            />
+            <IconButton
+              theme={theme}
+              icon="GalleryVertical"
+              label="Continuous"
+              tooltip={
+                props.continuous
+                  ? "Continuous: all pages in one scroll"
+                  : "Continuous off: one page at a time"
+              }
+              selected={props.continuous}
+              disabled={disabled}
+              onPress={props.onContinuous}
             />
           </>
         )}

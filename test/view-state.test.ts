@@ -27,7 +27,7 @@ describe("savedViewFromLocation", () => {
   it("records the page, scale, and the view's corner in PDF points", () => {
     const view = savedViewFromLocation(
       { pageNumber: 3, scale: "page-fit", left: -12.4, top: 701.6 },
-      { invert: true, tool: "hand" },
+      { invert: true, tool: "hand", continuous: false },
     );
     expect(view).toEqual({
       page: 3,
@@ -36,15 +36,20 @@ describe("savedViewFromLocation", () => {
       top: 702,
       invert: true,
       tool: "hand",
+      continuous: false,
     });
     expect(savedViewSchema.parse(view)).toEqual(view);
   });
 });
 
 describe("savedViewSchema", () => {
-  it("keeps the position of a tab saved before the tool setting existed", () => {
+  it("keeps the position of a tab saved before the tool and continuous settings existed", () => {
     const legacy = { page: 7, scale: "1.5", left: 0, top: 400, invert: true };
-    expect(savedViewSchema.parse(legacy)).toEqual({ ...legacy, tool: "select" });
+    expect(savedViewSchema.parse(legacy)).toEqual({
+      ...legacy,
+      tool: "select",
+      continuous: true,
+    });
   });
 });
 

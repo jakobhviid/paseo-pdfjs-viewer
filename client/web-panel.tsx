@@ -90,6 +90,7 @@ export function WebPdfPanel({ file, tab, theme, layout }: PluginFilePanelProps) 
       theme: themeRef.current,
       invert: savedRef.current.invert,
       tool: savedRef.current.tool,
+      continuous: savedRef.current.continuous,
       fetchRuntimePart,
       fetchBinaryData,
       callbacks: {
@@ -177,6 +178,11 @@ export function WebPdfPanel({ file, tab, theme, layout }: PluginFilePanelProps) 
     },
     [setSaved],
   );
+  const onContinuous = useCallback(() => {
+    const continuous = !savedRef.current.continuous;
+    setSaved({ ...savedRef.current, continuous });
+    viewer.current?.setContinuous(continuous);
+  }, [setSaved]);
   const retry = useCallback(() => reloads.current?.request(true), []);
   const openZoomMenu = useCallback((anchor: View | null) => {
     const container = panel.current;
@@ -235,6 +241,8 @@ export function WebPdfPanel({ file, tab, theme, layout }: PluginFilePanelProps) 
           onInvert={onInvert}
           tool={saved.tool}
           onTool={onTool}
+          continuous={saved.continuous}
+          onContinuous={onContinuous}
         />
       </TooltipProvider>
       {status ? (
