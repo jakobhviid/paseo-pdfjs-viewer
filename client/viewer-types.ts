@@ -66,6 +66,11 @@ export interface ViewerController {
 export interface CreateViewerControllerOptions {
   /** The element to mount into: on web, a React Native `View` ref is its DOM element. */
   host: unknown;
+  /**
+   * Where page keys work: the whole panel, toolbar included, as in Firefox's and Okular's viewers.
+   * On web, a React Native `View` ref is its DOM element. Defaults to the document itself.
+   */
+  keyboardScope?: unknown;
   theme: PluginTheme;
   invert: boolean;
   tool: Tool;

@@ -86,6 +86,7 @@ class PdfViewerController implements ViewerController {
   private readonly area: AreaSelection;
   /** Set while restoring a saved or rebuilt view, which is not a navigation. */
   private restoring = false;
+  private readonly keyboardScope: HTMLElement;
 
   constructor(private readonly options: CreateViewerControllerOptions) {
     const host = options.host as HTMLElement;
@@ -100,6 +101,9 @@ class PdfViewerController implements ViewerController {
     this.setTool(options.tool);
     this.setTheme(options.theme);
     this.root.addEventListener("click", this.onClick, true);
+    this.root.addEventListener("focusout", this.onFocusOut);
+    this.keyboardScope = (options.keyboardScope as HTMLElement | undefined) ?? this.root;
+    this.keyboardScope.addEventListener("keydown", this.onKeyDown);
     this.resizeObserver = new ResizeObserver(() => this.onResize());
     this.resizeObserver.observe(this.root);
   }
@@ -259,6 +263,8 @@ class PdfViewerController implements ViewerController {
     this.openSequence += 1;
     this.resizeObserver.disconnect();
     this.root.removeEventListener("click", this.onClick, true);
+    this.root.removeEventListener("focusout", this.onFocusOut);
+    this.keyboardScope.removeEventListener("keydown", this.onKeyDown);
     this.area.clear();
     void this.passwordTask?.task.destroy();
     this.passwordTask = null;
@@ -343,7 +349,6 @@ class PdfViewerController implements ViewerController {
     this.listen(layer);
     container.addEventListener("wheel", (event) => this.onWheel(layer, event), { passive: false });
     container.addEventListener("pointerdown", (event) => this.onPointerDown(layer, event));
-    container.addEventListener("keydown", (event) => this.onKeyDown(layer, event));
     return layer;
   }
 
@@ -521,8 +526,12 @@ class PdfViewerController implements ViewerController {
   /**
    * Left and Right turn whole pages when the page fits the width, as in Firefox's, Chrome's, and
    * Okular's viewers; zoomed in further, they scroll sideways as usual. The jump is immediate.
+   * The keys work anywhere in the panel, so a toolbar button keeping focus after a click does not
+   * stop them, except in text fields and open menus, where arrows mean something else.
    */
-  private onKeyDown(layer: Layer, event: KeyboardEvent): void {
+  private readonly onKeyDown = (event: KeyboardEvent): void => {
+    const layer = this.current;
+    if (!layer || event.defaultPrevented) return;
     if (event.key === "Escape" && this.area.active) {
       event.preventDefault();
       this.area.clear();
@@ -530,11 +539,32 @@ class PdfViewerController implements ViewerController {
     }
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    if (this.current !== layer || layer.pdfViewer.isHorizontalScrollbarEnabled) return;
+    const target = event.target as Element | null;
+    // Text fields use arrows to move the caret; an open menu (the zoom menu) owns the keys.
+    if (isEditable(target) || this.keyboardScope.querySelector("[role='menu']")) return;
+    if (layer.pdfViewer.isHorizontalScrollbarEnabled) {
+      // Sideways scrolling belongs to the document; from the toolbar, nothing scrolls.
+      return;
+    }
     event.preventDefault();
     if (event.key === "ArrowRight") this.nextPage();
     else this.previousPage();
-  }
+  };
+
+  /**
+   * When the focused element inside the viewer is removed (the area tool's Copy bar after a copy,
+   * or a link in an annotation layer PDF.js discards), focus would fall to the page body and the
+   * keys would stop until the next click. Give it back to the document instead.
+   */
+  private readonly onFocusOut = (event: FocusEvent): void => {
+    const lost = event.target as Element | null;
+    if (event.relatedTarget) return;
+    setTimeout(() => {
+      if (this.destroyed || lost?.isConnected) return;
+      if (document.activeElement && document.activeElement !== document.body) return;
+      this.focus();
+    }, 0);
+  };
 
   private onPointerDown(layer: Layer, event: PointerEvent): void {
     if (this.current !== layer) return;

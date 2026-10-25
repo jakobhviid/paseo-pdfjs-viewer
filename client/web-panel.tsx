@@ -86,6 +86,7 @@ export function WebPdfPanel({ file, tab, theme, layout }: PluginFilePanelProps) 
     }, SAVE_VIEW_MS);
     const controller = createViewerController({
       host: host.current,
+      keyboardScope: panel.current,
       theme: themeRef.current,
       invert: savedRef.current.invert,
       tool: savedRef.current.tool,
