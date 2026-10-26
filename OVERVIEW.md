@@ -2,6 +2,8 @@ Read PDFs inside Paseo's file tab. Click a `.pdf` in Files and it opens in a [PD
 
 The viewer is meant for documents an agent or a build keeps rewriting, such as Typst or LaTeX output. When the file changes, the tab reloads it and keeps your page, zoom, and scroll position, and it shows the old version until the new one has drawn. The tab also remembers where you were when you close and reopen it.
 
+To open a PDF at a page from chat, link it with a line fragment, such as `[the results](report.pdf#L5)` for page 5. Paseo passes the line to the viewer, which reads it as the page; a link to an open tab jumps to the page.
+
 What you can do in the viewer:
 
 - Select and copy text, and follow links. Links inside the document jump within it; web links open in your browser.
