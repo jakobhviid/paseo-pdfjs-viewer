@@ -34,10 +34,27 @@ afterAll(async () => {
   rmSync(directory, { recursive: true, force: true });
 });
 
-function writePdf(name: string, sizes: { width: number; height: number }[]): string {
+function writePdf(
+  name: string,
+  sizes: { width: number; height: number }[],
+  options?: { password?: string },
+): string {
   const file = path.join(directory, name);
-  writeFileSync(file, makePdf(sizes));
+  writeFileSync(file, makePdf(sizes, options));
   return file;
+}
+
+async function renderOk(file: string, revision: string, password?: string) {
+  const page = await native.renderPage({
+    path: file,
+    password,
+    revision,
+    page: 0,
+    width: 120,
+    invert: false,
+  });
+  if (page.status !== "ok") throw new Error(`Expected a render, got ${page.status}`);
+  return decodePng(Buffer.from(page.base64, "base64"));
 }
 
 describe("native rendering", () => {
@@ -124,6 +141,77 @@ describe("native rendering", () => {
     const file = path.join(directory, "broken.pdf");
     writeFileSync(file, "not a pdf");
     await expect(native.openPdf({ path: file })).rejects.toThrow();
+  });
+});
+
+describe("the render worker", () => {
+  it("opens a document again after the worker evicted it", async () => {
+    // The worker keeps four documents open; opening more evicts the first.
+    const files = Array.from({ length: 6 }, (_, index) =>
+      writePdf(`evict-${index}.pdf`, [{ width: 600, height: 800 }]),
+    );
+    const revisions: string[] = [];
+    for (const file of files) {
+      const opened = await native.openPdf({ path: file });
+      if (opened.status !== "ok") throw new Error("not opened");
+      revisions.push(opened.revision);
+    }
+    expect(pixel(await renderOk(files[0], revisions[0]), 5, 5)).toEqual([0, 0, 0]);
+  });
+
+  it("renders after the worker was stopped", async () => {
+    const file = writePdf("restart.pdf", [{ width: 600, height: 800 }]);
+    const opened = await native.openPdf({ path: file });
+    if (opened.status !== "ok") throw new Error("not opened");
+    await native.disposeNative();
+    expect(pixel(await renderOk(file, opened.revision), 5, 5)).toEqual([0, 0, 0]);
+  });
+
+  it("asks for the password of an encrypted PDF and opens it with the right one", async () => {
+    const file = writePdf("locked.pdf", [{ width: 600, height: 800 }], { password: "secret" });
+    expect(await native.openPdf({ path: file })).toEqual({ status: "password", incorrect: false });
+    expect(await native.openPdf({ path: file, password: "wrong" })).toEqual({
+      status: "password",
+      incorrect: true,
+    });
+    const opened = await native.openPdf({ path: file, password: "secret" });
+    if (opened.status !== "ok") throw new Error("not opened");
+    expect(opened.pages).toEqual([{ width: 600, height: 800 }]);
+    expect(pixel(await renderOk(file, opened.revision, "secret"), 5, 5)).toEqual([0, 0, 0]);
+    await expect(
+      native.renderPage({
+        path: file,
+        revision: opened.revision,
+        page: 0,
+        width: 120,
+        invert: false,
+      }),
+    ).rejects.toThrow(/password/);
+  });
+
+  it("serves renders of one file in order while another file renders", async () => {
+    const a = writePdf("order-a.pdf", [
+      { width: 600, height: 800 },
+      { width: 600, height: 800 },
+    ]);
+    const b = writePdf("order-b.pdf", [{ width: 800, height: 600 }]);
+    const [openA, openB] = await Promise.all([
+      native.openPdf({ path: a }),
+      native.openPdf({ path: b }),
+    ]);
+    if (openA.status !== "ok" || openB.status !== "ok") throw new Error("not opened");
+    const renders = await Promise.all([
+      native.renderPage({ path: a, revision: openA.revision, page: 0, width: 60, invert: false }),
+      native.renderPage({ path: b, revision: openB.revision, page: 0, width: 80, invert: false }),
+      native.renderPage({ path: a, revision: openA.revision, page: 1, width: 60, invert: false }),
+    ]);
+    expect(
+      renders.map((render) => render.status === "ok" && [render.width, render.height]),
+    ).toEqual([
+      [60, 80],
+      [80, 60],
+      [60, 80],
+    ]);
   });
 });
 

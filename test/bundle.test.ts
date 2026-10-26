@@ -48,7 +48,7 @@ describe("client bundle", () => {
 
 describe("server bundle", () => {
   it.runIf(existsSync("server/generated/pdfjs-assets.js"))(
-    "inlines PDFium for the iOS renderer, leaving only host modules external",
+    "embeds PDFium for the iOS render worker, leaving only host modules external",
     async () => {
       // Mirrors the server options in Paseo's plugin compiler.
       const result = await build({

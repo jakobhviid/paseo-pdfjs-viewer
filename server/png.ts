@@ -1,4 +1,7 @@
-import { deflateSync } from "node:zlib";
+import { promisify } from "node:util";
+import { deflate as deflateCallback } from "node:zlib";
+
+const deflate = promisify(deflateCallback);
 
 const SIGNATURE = Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
 
@@ -33,14 +36,15 @@ function chunk(type: string, data: Uint8Array): Buffer {
 /**
  * Encodes an opaque RGBA bitmap as an 8-bit RGB PNG. Alpha is dropped: PDFium fills the page white
  * before drawing. `invert` flips the colors for dark themes, as the web viewer's CSS filter does.
- * Each row uses the Up filter, which suits pages that are mostly flat color and text.
+ * Each row uses the Up filter, which suits pages that are mostly flat color and text. Compression
+ * runs on Node's thread pool, off the plugin's thread.
  */
-export function encodePng(
+export async function encodePng(
   rgba: Uint8Array,
   width: number,
   height: number,
   { invert = false }: { invert?: boolean } = {},
-): Buffer {
+): Promise<Buffer> {
   if (rgba.length < width * height * 4) throw new Error("The bitmap is smaller than its size.");
   const stride = width * 3;
   const raw = Buffer.alloc((stride + 1) * height);
@@ -67,7 +71,7 @@ export function encodePng(
   return Buffer.concat([
     SIGNATURE,
     chunk("IHDR", header),
-    chunk("IDAT", deflateSync(raw, { level: 6 })),
+    chunk("IDAT", await deflate(raw, { level: 6 })),
     chunk("IEND", new Uint8Array(0)),
   ]);
 }

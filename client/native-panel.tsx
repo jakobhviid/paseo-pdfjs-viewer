@@ -28,9 +28,7 @@ import { nativeOpen, nativePage } from "../shared/rpc";
 import {
   type Anchor,
   anchorAt,
-  byDistance,
   currentPage,
-  KEEP,
   layoutPages,
   MAX_ZOOM,
   offsetOf,
@@ -39,12 +37,26 @@ import {
   renderWidth,
   visibleRange,
 } from "./native-layout";
+import {
+  keptRange,
+  type PageImage,
+  type PageRender,
+  prunedImages,
+  statusMessage,
+  summarizeStack,
+  type Viewport,
+  wantedRenders,
+  withImage,
+} from "./native-state";
+import { linkedPage } from "./page-link";
 import { createReloadScheduler, type ReloadScheduler, type ReloadState } from "./reload-scheduler";
+import { createRenderQueue } from "./render-queue";
 import { throttle } from "./throttle";
 import { defaultSavedView, savedViewSchema } from "./view-state";
 
 const SAVE_VIEW_MS = 500;
-const RENDER_SETTLE_MS = 100;
+/** Page renders in flight at once; the daemon renders one at a time and encodes the other. */
+const RENDER_CONCURRENCY = 2;
 /** Automatic recoveries from a render error before the panel waits for the user instead. */
 const MAX_RECOVERIES = 3;
 const RECOVERY_WINDOW_MS = 10_000;
@@ -52,21 +64,6 @@ const RECOVERY_WINDOW_MS = 10_000;
 interface OpenedDocument {
   revision: string;
   pages: PageSize[];
-}
-
-interface PageImage {
-  id: number;
-  uri: string;
-  revision: string;
-  width: number;
-  invert: boolean;
-}
-
-interface Viewport {
-  first: number;
-  last: number;
-  current: number;
-  width: number;
 }
 
 /**
@@ -120,7 +117,7 @@ export function NativePdfPanel(props: PluginFilePanelProps) {
         </View>
       ) : null}
       <ReaderBoundary resetKey={mount} onError={onError}>
-        <NativeReader key={mount} {...props} />
+        <NativeReader key={mount} {...props} initialLink={mount === 0} />
       </ReaderBoundary>
     </View>
   );
@@ -152,23 +149,15 @@ class ReaderBoundary extends Component<
   }
 }
 
-/** The innermost components of a React component stack, innermost first. */
-export function summarizeStack(stack: string, count = 6): string {
-  return stack
-    .split("\n")
-    .map((line) =>
-      line
-        .trim()
-        .replace(/^in\s+/, "")
-        .replace(/^at\s+/, ""),
-    )
-    .map((line) => line.split(/\s+\(/)[0])
-    .filter((line) => line.length > 0)
-    .slice(0, count)
-    .join(" ‹ ");
-}
-
-function NativeReader({ file, tab, theme, layout }: PluginFilePanelProps) {
+function NativeReader({
+  file,
+  tab,
+  theme,
+  layout,
+  params,
+  revision,
+  initialLink,
+}: PluginFilePanelProps & { initialLink: boolean }) {
   const open = useRpc(nativeOpen);
   const render = useRpc(nativePage);
   const [saved, setSaved] = useTabState(tab, savedViewSchema, defaultSavedView);
@@ -180,9 +169,7 @@ function NativeReader({ file, tab, theme, layout }: PluginFilePanelProps) {
   pdfRef.current = pdf;
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [viewport, setViewport] = useState<Viewport | null>(null);
-  const [images, setImages] = useState<Record<number, PageImage>>({});
-  const imagesRef = useRef(images);
-  imagesRef.current = images;
+  const [images, setImages] = useState<Readonly<Record<number, PageImage>>>({});
   const [pageErrors, setPageErrors] = useState<Record<number, string>>({});
   const [reload, setReload] = useState<{ state: ReloadState; error: string | null }>({
     state: "loading",
@@ -198,10 +185,14 @@ function NativeReader({ file, tab, theme, layout }: PluginFilePanelProps) {
   const contentHeight = useRef(0);
   // Where to put the view once the layout it refers to is on screen: the saved page at first,
   // then the reader's place whenever a rebuild or a resize moves the pages.
-  const pendingAnchor = useRef<Anchor | null>({ page: Math.max(0, saved.page - 1), fraction: 0 });
+  const pendingAnchor = useRef<Anchor | null>({
+    page: Math.max(0, ((initialLink ? linkedPage(params) : null) ?? saved.page) - 1),
+    fraction: 0,
+  });
   const reloads = useRef<ReloadScheduler | null>(null);
-  const inflight = useRef(new Set<string>());
   const imageIds = useRef(0);
+  const renderRef = useRef(render);
+  renderRef.current = render;
 
   const pageLayout = useMemo(
     () => (pdf && size.width > 0 ? layoutPages(pdf.pages, size.width) : null),
@@ -216,7 +207,9 @@ function NativeReader({ file, tab, theme, layout }: PluginFilePanelProps) {
   const saveView = useMemo(
     () =>
       throttle((page: number) => {
-        // Native keeps the page only; the web viewer's point coordinates are its own.
+        // Native keeps the page only. The web viewer's point position belongs to its page, so it
+        // is cleared only when the page changes.
+        if (savedRef.current.page === page + 1) return;
         setSaved({ ...savedRef.current, page: page + 1, left: null, top: null });
       }, SAVE_VIEW_MS),
     [setSaved],
@@ -323,90 +316,63 @@ function NativeReader({ file, tab, theme, layout }: PluginFilePanelProps) {
     if (shownPage !== undefined) saveView(shownPage);
   }, [shownPage, saveView]);
 
-  // Render the pages near the view that lack a current image, nearest first, once the view has
-  // held still briefly: a fast fling passes many pages, and rendering each would flood the relay.
-  useEffect(() => {
-    if (!pdf || !viewport) return;
-    let cancelled = false;
-    const { revision } = pdf;
-    const renderNearby = async () => {
-      for (const page of byDistance(viewport.first, viewport.last, viewport.current)) {
-        if (cancelled) return;
-        const have = imagesRef.current[page];
-        if (
-          have &&
-          have.revision === revision &&
-          have.invert === invert &&
-          have.width >= viewport.width
-        ) {
-          continue;
-        }
-        const key = `${revision}:${page}:${viewport.width}:${invert}`;
-        if (inflight.current.has(key)) continue;
-        inflight.current.add(key);
-        try {
-          const result = await render({
-            path: file.path,
-            password: passwordRef.current,
-            revision,
-            page,
-            width: viewport.width,
-            invert,
-          });
-          if (result.status === "stale") {
-            reloads.current?.request(true);
-            return;
+  // Renders run through one queue: the pages the view wants, nearest first, two at a time.
+  const queue = useMemo(
+    () =>
+      createRenderQueue<PageRender>({
+        concurrency: RENDER_CONCURRENCY,
+        run: async (job) => {
+          try {
+            const result = await renderRef.current({
+              path: file.path,
+              password: passwordRef.current,
+              revision: job.revision,
+              page: job.page,
+              width: job.width,
+              invert: job.invert,
+            });
+            if (result.status === "stale") {
+              reloads.current?.request(true);
+              return;
+            }
+            if (pdfRef.current?.revision !== job.revision || invertRef.current !== job.invert)
+              return;
+            imageIds.current += 1;
+            const image: PageImage = {
+              id: imageIds.current,
+              uri: `data:image/png;base64,${result.base64}`,
+              revision: job.revision,
+              width: result.width,
+              invert: job.invert,
+            };
+            setImages((previous) => withImage(previous, job.page, image));
+            setPageErrors((previous) => {
+              if (!(job.page in previous)) return previous;
+              const { [job.page]: _, ...rest } = previous;
+              return rest;
+            });
+          } catch (error) {
+            setPageErrors((previous) => ({ ...previous, [job.page]: messageOf(error) }));
           }
-          if (pdfRef.current?.revision !== revision || invertRef.current !== invert) continue;
-          imageIds.current += 1;
-          const image: PageImage = {
-            id: imageIds.current,
-            uri: `data:image/png;base64,${result.base64}`,
-            revision,
-            width: result.width,
-            invert,
-          };
-          setImages((previous) => {
-            const existing = previous[page];
-            const better =
-              existing &&
-              existing.revision === revision &&
-              existing.invert === invert &&
-              existing.width > image.width;
-            return better ? previous : { ...previous, [page]: image };
-          });
-          setPageErrors((previous) => {
-            if (!(page in previous)) return previous;
-            const { [page]: _, ...rest } = previous;
-            return rest;
-          });
-        } catch (error) {
-          setPageErrors((previous) => ({ ...previous, [page]: messageOf(error) }));
-        } finally {
-          inflight.current.delete(key);
-        }
-      }
-    };
-    const timer = setTimeout(() => void renderNearby(), RENDER_SETTLE_MS);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [pdf, viewport, invert, file.path, render]);
+        },
+      }),
+    [file],
+  );
+  useEffect(() => () => queue.dispose(), [queue]);
+
+  // Each move of the view, and each image that arrives, restates what the view still needs.
+  useEffect(() => {
+    queue.want(
+      pdf && viewport ? wantedRenders(viewport, pdf.revision, invert, images, pageErrors) : [],
+    );
+  }, [queue, pdf, viewport, invert, images, pageErrors]);
 
   // Drop images far from the view; they render again when the reader comes back.
   useEffect(() => {
-    if (!viewport) return;
-    const low = viewport.first - KEEP;
-    const high = viewport.last + KEEP;
-    setImages((previous) => {
-      const pages = Object.keys(previous).map(Number);
-      if (pages.every((page) => page >= low && page <= high)) return previous;
-      const kept: Record<number, PageImage> = {};
-      for (const page of pages) if (page >= low && page <= high) kept[page] = previous[page];
-      return kept;
-    });
-  }, [viewport]);
+    if (!viewport || !pdf) return;
+    const range = keptRange(viewport, pdf.pages.length);
+    setImages((previous) => prunedImages(previous, range));
+  }, [viewport, pdf]);
 
   const onLayout = useCallback((event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout;
@@ -437,10 +403,27 @@ function NativeReader({ file, tab, theme, layout }: PluginFilePanelProps) {
     scroll.current?.scrollTo({ x, y: current.boxes[index].top * zoom, animated: true });
   }, []);
 
+  // A link to a page of this file while its tab is open re-sends the params with a new revision.
+  const openedRevision = useRef(revision);
+  useEffect(() => {
+    if (revision === openedRevision.current) return;
+    openedRevision.current = revision;
+    const page = linkedPage(params);
+    if (page === null) return;
+    pendingAnchor.current = { page: page - 1, fraction: 0 };
+    applyAnchor();
+  }, [revision, params, applyAnchor]);
+
   const onInvert = useCallback(() => {
     setSaved({ ...savedRef.current, invert: !savedRef.current.invert });
   }, [setSaved]);
   const retry = useCallback(() => reloads.current?.request(true), []);
+  const retryPage = useCallback((page: number) => {
+    setPageErrors((previous) => {
+      const { [page]: _, ...rest } = previous;
+      return rest;
+    });
+  }, []);
   const submitPassword = useCallback((value: string) => {
     passwordRef.current = value;
     reloads.current?.request(true);
@@ -454,8 +437,7 @@ function NativeReader({ file, tab, theme, layout }: PluginFilePanelProps) {
 
   const pages: ReactNode[] = [];
   if (pageLayout && viewport) {
-    const low = Math.max(0, viewport.first - KEEP);
-    const high = Math.min(pageLayout.boxes.length - 1, viewport.last + KEEP);
+    const { low, high } = keptRange(viewport, pageLayout.boxes.length);
     for (let index = low; index <= high; index += 1) {
       const box = pageLayout.boxes[index];
       pages.push(
@@ -465,7 +447,9 @@ function NativeReader({ file, tab, theme, layout }: PluginFilePanelProps) {
           width={size.width}
           height={box.height}
           image={images[index] ?? null}
+          page={index}
           error={pageErrors[index] ?? null}
+          onRetry={retryPage}
           placeholder={theme.colors.surface2}
           errorColor={theme.colors.statusDanger}
         />,
@@ -548,16 +532,20 @@ const PageView = memo(function PageView({
   top,
   width,
   height,
+  page,
   image,
   error,
+  onRetry,
   placeholder,
   errorColor,
 }: {
   top: number;
   width: number;
   height: number;
+  page: number;
   image: PageImage | null;
   error: string | null;
+  onRetry(page: number): void;
   placeholder: string;
   errorColor: string;
 }) {
@@ -580,10 +568,29 @@ const PageView = memo(function PageView({
           onLoad={layer === shown ? undefined : () => setShown(layer)}
         />
       ))}
-      {error && !shown ? (
-        <View style={[fill, { alignItems: "center", justifyContent: "center", padding: 16 }]}>
-          <Text style={{ color: errorColor, textAlign: "center" }}>{error}</Text>
-        </View>
+      {error ? (
+        // Over an older image, a strip at the page's top; on an empty page, centered.
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Page ${page + 1} could not be shown. Retry`}
+          onPress={() => onRetry(page)}
+          style={
+            shown
+              ? {
+                  position: "absolute",
+                  left: 0,
+                  top: 0,
+                  width,
+                  padding: 8,
+                  backgroundColor: placeholder,
+                }
+              : [fill, { alignItems: "center", justifyContent: "center", padding: 16 }]
+          }
+        >
+          <Text style={{ color: errorColor, textAlign: "center" }}>
+            {shown ? "Couldn't show the latest version of this page." : error} Tap to retry.
+          </Text>
+        </Pressable>
       ) : null}
     </View>
   );
@@ -635,27 +642,6 @@ function ToolbarButton({
       <Icon name={icon} size={20} color={theme.colors.foreground} />
     </Pressable>
   );
-}
-
-function statusMessage({
-  loaded,
-  reload,
-  deleted,
-}: {
-  loaded: boolean;
-  reload: { state: ReloadState; error: string | null };
-  deleted: boolean;
-}): { text: string; danger: boolean; retry: boolean } | null {
-  if (deleted)
-    return { text: "The file was deleted. Showing the last version.", danger: false, retry: false };
-  if (!loaded) return null;
-  if (reload.state === "failed") {
-    return { text: "Couldn't load the latest version.", danger: true, retry: true };
-  }
-  if (reload.state === "waiting" && reload.error) {
-    return { text: "Couldn't load the latest version yet. Retrying…", danger: false, retry: false };
-  }
-  return null;
 }
 
 function PasswordPrompt({

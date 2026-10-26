@@ -49,18 +49,29 @@ it later with **Open with…** in the tab menu or in **Settings › Files**.
   stays on screen.
 - **iOS renders on the daemon.** Plugins on iOS have no web view that runs scripts, so PDF.js
   cannot run there. `client/native-panel.tsx` asks the server code (`server/native.ts`) to open
-  the file by its host path and to render the pages near the view; PDFium
-  ([`@hyzyla/pdfium/inline`](https://www.npmjs.com/package/@hyzyla/pdfium), WebAssembly with the
-  binary inlined, so it survives Paseo's bundling) draws each page and `server/png.ts` encodes it.
-  Pages show as `Image`s in a `ScrollView` with native pinch zoom; zooming past a whole step
-  re-renders sharper pages. A rebuild re-opens the file through the same reload scheduler, keeps
-  the reader's place as a page plus a fraction of it, and swaps each page's image once the new one
-  has loaded. Renders for a superseded version come back `stale`, which triggers a re-open.
+  the file by its host path and to render the pages near the view. Pages show as `Image`s in a
+  `ScrollView` with native pinch zoom; zooming past a whole step re-renders sharper pages. A
+  rebuild re-opens the file through the same reload scheduler, keeps the reader's place as a page
+  plus a fraction of it, and swaps each page's image once the new one has loaded. Renders for a
+  superseded version come back `stale`, which triggers a re-open.
+- **PDFium runs in a worker thread.** [`@hyzyla/pdfium`](https://www.npmjs.com/package/@hyzyla/pdfium)
+  is embedded like PDF.js: `scripts/embed-pdfium.mjs` writes its CommonJS build and wasm binary
+  into `server/generated/`, and `server/pdfium-host.ts` evaluates them in one worker, compiling
+  the wasm once. Requests go to the worker one at a time, each with a deadline; a request past
+  its deadline, a crashed worker, or a PDFium abort replaces the worker, and documents are opened
+  again on demand. An idle worker is stopped after a minute. Rendering never blocks the plugin's
+  own thread, so PDF.js asset requests from desktop and web are not held up, and PNG compression
+  runs on Node's thread pool.
+- **One render queue on the phone.** `client/render-queue.ts` runs at most two page renders at a
+  time. The panel restates the pages it wants, nearest the current page first, whenever the view
+  moves or an image arrives, and queued pages that are no longer wanted are dropped, so a fast
+  fling costs a couple of renders. A page whose render fails waits for a new version of the file
+  or a tap to retry.
 
 ## Limits
 
 - Not available in the Android app; see the next section. On iOS there is no text selection,
-  search, or links, and page rendering runs on the plugin's server thread, one page at a time.
+  search, or links inside the document, and pages render one at a time on the daemon.
 - On desktop and web, every change re-reads the whole file, because the plugin file API has no
   partial reads.
 - Non-embedded Chinese, Japanese, and Korean fonts need a matching system font.

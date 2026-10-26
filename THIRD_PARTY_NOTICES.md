@@ -14,7 +14,7 @@ the [`pdfjs-dist`](https://www.npmjs.com/package/pdfjs-dist) npm package into
 | JBIG2 decoder (PDFium, compiled by PDF.js) | `wasm/jbig2.wasm`                                                                                           | BSD-3-Clause; Apache-2.0    | `wasm/LICENSE_JBIG2`, `wasm/LICENSE_PDFJS_JBIG2`       |
 | OpenJPEG decoder (compiled by PDF.js)      | `wasm/openjpeg.wasm`                                                                                        | BSD-2-Clause                | `wasm/LICENSE_OPENJPEG`, `wasm/LICENSE_PDFJS_OPENJPEG` |
 
-The iOS renderer bundles [`@hyzyla/pdfium`](https://www.npmjs.com/package/@hyzyla/pdfium) (MIT,
-`node_modules/@hyzyla/pdfium/LICENSE.md`), a WebAssembly build of
-[PDFium](https://pdfium.googlesource.com/pdfium/) (BSD-3-Clause and Apache-2.0), into the plugin's
-server bundle when Paseo compiles it.
+For the iOS renderer, `scripts/embed-pdfium.mjs` copies `dist/index.cjs` and `dist/pdfium.wasm`
+from the [`@hyzyla/pdfium`](https://www.npmjs.com/package/@hyzyla/pdfium) npm package (MIT,
+`node_modules/@hyzyla/pdfium/LICENSE.md`) into `server/generated/pdfium-assets.js`. The wasm is a
+build of [PDFium](https://pdfium.googlesource.com/pdfium/) (BSD-3-Clause and Apache-2.0).

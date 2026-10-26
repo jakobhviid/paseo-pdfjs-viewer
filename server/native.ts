@@ -1,45 +1,77 @@
 import type { Stats } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { Worker } from "node:worker_threads";
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
-import { type PDFiumDocument, PDFiumLibrary } from "@hyzyla/pdfium/inline";
 import type { nativeOpen, nativePage } from "../shared/rpc";
+import { pdfiumSource, pdfiumWasm } from "./generated/pdfium-assets.js";
+import { createPdfiumHost, PdfiumError, type PdfiumHost, type WorkerLike } from "./pdfium-host";
+import {
+  type OpenResult,
+  pdfiumWorkerMain,
+  type RenderResult,
+  type WasmModule,
+} from "./pdfium-worker";
 import { encodePng } from "./png";
 
-// Renders pages for the iOS panel. PDFium is WebAssembly with its binary inlined in the bundle, so
-// nothing has to be installed on the host. Rendering is synchronous, so a heavy page holds up this
-// plugin's other requests for its duration; calls run one at a time to keep PDFium's single
-// instance consistent.
+// Renders pages for the iOS panel. PDFium runs in a worker thread (server/pdfium-host.ts); this
+// side reads files, tracks which version of each file is open, and encodes renders as PNG.
 
-/** Documents kept open, one per path, the least recently used closed first. */
-const MAX_OPEN_DOCUMENTS = 4;
 const MAX_FILE_BYTES = 512 * 1024 * 1024;
 /** About 4096 × 4096: an A4 page at 3× zoom on a large phone, before the width cap. */
 const MAX_PIXELS = 16 * 1024 * 1024;
+const OPEN_TIMEOUT_MS = 30_000;
+const RENDER_TIMEOUT_MS = 20_000;
+/** Versions remembered for answering a repeated open without asking the worker. */
+const MAX_KNOWN_DOCUMENTS = 32;
 
-interface OpenDocument {
+interface KnownDocument {
   revision: string;
   password: string | undefined;
-  document: PDFiumDocument;
   pages: { width: number; height: number }[];
 }
 
-let library: Promise<PDFiumLibrary> | null = null;
-const documents = new Map<string, OpenDocument>();
-let queue: Promise<unknown> = Promise.resolve();
+const known = new Map<string, KnownDocument>();
+const locks = new Map<string, Promise<unknown>>();
+let host: PdfiumHost | null = null;
+let compiled: Promise<WasmModule> | null = null;
 
-function exclusive<T>(task: () => Promise<T>): Promise<T> {
-  const run = queue.then(task, task);
-  queue = run.catch(() => undefined);
+const WORKER_SOURCE =
+  'const { parentPort, workerData } = require("node:worker_threads");\n' +
+  `(${pdfiumWorkerMain.toString()})(parentPort, workerData, require);\n`;
+
+/** Runs `task` after earlier tasks for the same file, so versions of one file never interleave. */
+function serially<T>(file: string, task: () => Promise<T>): Promise<T> {
+  const previous = locks.get(file) ?? Promise.resolve();
+  const run = previous.then(task, task);
+  const settled = run.catch(() => undefined);
+  locks.set(file, settled);
+  void settled.then(() => {
+    if (locks.get(file) === settled) locks.delete(file);
+  });
   return run;
 }
 
-function pdfium(): Promise<PDFiumLibrary> {
-  library ??= PDFiumLibrary.init({ disableBase64Warning: true }).catch((error: unknown) => {
-    library = null;
+async function startWorker(): Promise<WorkerLike> {
+  const wasm = (
+    globalThis as unknown as { WebAssembly: { compile(bytes: Uint8Array): Promise<WasmModule> } }
+  ).WebAssembly;
+  compiled ??= wasm.compile(Buffer.from(pdfiumWasm, "base64")).catch((error: unknown) => {
+    compiled = null;
     throw error;
   });
-  return library;
+  const worker = new Worker(WORKER_SOURCE, {
+    eval: true,
+    workerData: { source: pdfiumSource, wasm: await compiled },
+  });
+  // An idle worker must not keep the plugin process alive on its own.
+  worker.unref();
+  return worker as unknown as WorkerLike;
+}
+
+function pdfium(): PdfiumHost {
+  host ??= createPdfiumHost({ createWorker: startWorker });
+  return host;
 }
 
 export function revisionOf(stats: Stats): string {
@@ -53,69 +85,59 @@ function checkPath(file: string): string {
   return path.normalize(file);
 }
 
-function remember(file: string, entry: OpenDocument): void {
-  const previous = documents.get(file);
-  if (previous && previous !== entry) previous.document.destroy();
-  documents.delete(file);
-  documents.set(file, entry);
-  while (documents.size > MAX_OPEN_DOCUMENTS) {
-    const [oldest, evicted] = documents.entries().next().value as [string, OpenDocument];
-    documents.delete(oldest);
-    evicted.document.destroy();
-  }
+function remember(file: string, entry: KnownDocument): void {
+  known.delete(file);
+  known.set(file, entry);
+  while (known.size > MAX_KNOWN_DOCUMENTS) known.delete(known.keys().next().value as string);
 }
 
-async function openUnlocked(
+/**
+ * Opens the file's current version in the worker. With `reuse`, a version the worker was already
+ * given is answered from memory; a render reports it if the worker no longer has it.
+ */
+async function openFile(
   file: string,
   password: string | undefined,
+  reuse: boolean,
 ): Promise<RpcOutput<typeof nativeOpen>> {
   const before = await stat(file);
   if (!before.isFile()) throw new Error("This is not a file.");
   if (before.size > MAX_FILE_BYTES) throw new Error("This PDF is larger than 512 MB.");
   const revision = revisionOf(before);
 
-  const cached = documents.get(file);
-  if (cached && cached.revision === revision && cached.password === password) {
+  const cached = known.get(file);
+  if (reuse && cached && cached.revision === revision && cached.password === password) {
     remember(file, cached);
     return { status: "ok", revision, pages: cached.pages };
   }
 
-  const bytes = await readFile(file);
+  const bytes = new Uint8Array(await readFile(file));
   // A compiler may still be writing it; the app retries once the file settles.
   if (revisionOf(await stat(file)) !== revision)
     throw new Error("The PDF changed while it was read.");
 
-  let document: PDFiumDocument;
+  let opened: OpenResult;
   try {
-    document = await (await pdfium()).loadDocument(new Uint8Array(bytes), password);
+    opened = (await pdfium().call(
+      { op: "open", key: file, revision, bytes, password },
+      { timeoutMs: OPEN_TIMEOUT_MS, transfer: [bytes.buffer as ArrayBuffer] },
+    )) as OpenResult;
   } catch (error) {
-    if (error instanceof Error && /password/i.test(error.message)) {
+    if (error instanceof PdfiumError && error.kind === "password") {
       return { status: "password", incorrect: Boolean(password) };
     }
     throw error;
   }
-  const pages: OpenDocument["pages"] = [];
-  try {
-    const count = document.getPageCount();
-    for (let index = 0; index < count; index += 1) {
-      const page = document.getPage(index);
-      try {
-        const { originalWidth, originalHeight } = page.getOriginalSize();
-        pages.push({ width: originalWidth, height: originalHeight });
-      } finally {
-        page.close();
-      }
-    }
-  } catch (error) {
-    document.destroy();
-    throw error;
-  }
-  remember(file, { revision, password, document, pages });
-  return { status: "ok", revision, pages };
+  remember(file, { revision, password, pages: opened.pages });
+  return { status: "ok", revision, pages: opened.pages };
 }
 
-export function openPdf({ path: file, password }: RpcInput<typeof nativeOpen>) {
-  return exclusive(() => openUnlocked(checkPath(file), password));
+export async function openPdf({
+  path: file,
+  password,
+}: RpcInput<typeof nativeOpen>): Promise<RpcOutput<typeof nativeOpen>> {
+  const checked = checkPath(file);
+  return serially(checked, () => openFile(checked, password, true));
 }
 
 /** Pixel size for a page `width` pixels wide, shrunk to stay under MAX_PIXELS. */
@@ -134,45 +156,57 @@ export function renderSize(
   return { width: w, height: h };
 }
 
-export function renderPage(
+async function renderBitmap(
+  file: string,
   input: RpcInput<typeof nativePage>,
-): Promise<RpcOutput<typeof nativePage>> {
-  return exclusive(async () => {
-    const file = checkPath(input.path);
-    let entry = documents.get(file);
-    if (!entry || entry.password !== input.password) {
-      // Evicted, or this subprocess restarted since the app opened the file.
-      const opened = await openUnlocked(file, input.password);
-      if (opened.status === "password") throw new Error("The PDF needs its password again.");
-      entry = documents.get(file);
-    }
-    if (!entry || entry.revision !== input.revision) return { status: "stale" };
-    const size = entry.pages[input.page];
-    if (!size) throw new Error(`The PDF has no page ${input.page + 1}.`);
-
-    const target = renderSize(size, input.width);
-    const page = entry.document.getPage(input.page);
-    try {
-      const bitmap = await page.render({ width: target.width, height: target.height, scale: 1 });
-      const png = encodePng(bitmap.data, bitmap.width, bitmap.height, { invert: input.invert });
-      return {
-        status: "ok",
-        width: bitmap.width,
-        height: bitmap.height,
-        base64: png.toString("base64"),
-      };
-    } finally {
-      page.close();
-    }
-  });
+): Promise<RenderResult | "stale"> {
+  let entry = known.get(file);
+  if (!entry || entry.password !== input.password) {
+    // Not opened since this process started, or opened with another password.
+    const opened = await openFile(file, input.password, true);
+    if (opened.status === "password") throw new Error("The PDF needs its password again.");
+    entry = known.get(file);
+  }
+  if (!entry || entry.revision !== input.revision) return "stale";
+  const size = entry.pages[input.page];
+  if (!size) throw new Error(`The PDF has no page ${input.page + 1}.`);
+  const request = {
+    op: "render" as const,
+    key: file,
+    revision: input.revision,
+    page: input.page,
+    ...renderSize(size, input.width),
+  };
+  try {
+    return (await pdfium().call(request, { timeoutMs: RENDER_TIMEOUT_MS })) as RenderResult;
+  } catch (error) {
+    if (!(error instanceof PdfiumError && error.kind === "missing")) throw error;
+  }
+  // The worker evicted the document or was replaced: open this version again, if it still is.
+  const reopened = await openFile(file, input.password, false);
+  if (reopened.status === "password") throw new Error("The PDF needs its password again.");
+  if (reopened.revision !== input.revision) return "stale";
+  return (await pdfium().call(request, { timeoutMs: RENDER_TIMEOUT_MS })) as RenderResult;
 }
 
-export function disposeNative(): Promise<void> {
-  return exclusive(async () => {
-    for (const entry of documents.values()) entry.document.destroy();
-    documents.clear();
-    const loaded = library;
-    library = null;
-    if (loaded) (await loaded.catch(() => null))?.destroy();
-  });
+export async function renderPage(
+  input: RpcInput<typeof nativePage>,
+): Promise<RpcOutput<typeof nativePage>> {
+  const file = checkPath(input.path);
+  const bitmap = await serially(file, () => renderBitmap(file, input));
+  if (bitmap === "stale") return { status: "stale" };
+  // Encoding runs after the file's turn, so its next page can render meanwhile.
+  const png = await encodePng(bitmap.data, bitmap.width, bitmap.height, { invert: input.invert });
+  return {
+    status: "ok",
+    width: bitmap.width,
+    height: bitmap.height,
+    base64: png.toString("base64"),
+  };
+}
+
+export async function disposeNative(): Promise<void> {
+  host?.dispose();
+  host = null;
+  known.clear();
 }
