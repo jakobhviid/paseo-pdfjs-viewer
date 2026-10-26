@@ -16,6 +16,7 @@ import {
 } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { binaryData, runtimePart } from "../shared/rpc";
+import { linkedPage } from "./page-link";
 import { createReloadScheduler, type ReloadScheduler, type ReloadState } from "./reload-scheduler";
 import { throttle } from "./throttle";
 import { Toolbar } from "./toolbar";
@@ -41,7 +42,7 @@ const SAVE_VIEW_MS = 500;
 
 const IDLE_FIND: FindStatus = { query: "", current: 0, total: 0, state: "idle" };
 
-export function WebPdfPanel({ file, tab, theme, layout }: PluginFilePanelProps) {
+export function WebPdfPanel({ file, tab, theme, layout, params, revision }: PluginFilePanelProps) {
   const fetchRuntimePart = useRpc(runtimePart);
   const fetchBinaryData = useRpc(binaryData);
   const toast = useToast();
@@ -59,6 +60,10 @@ export function WebPdfPanel({ file, tab, theme, layout }: PluginFilePanelProps) 
   const viewer = useRef<ViewerController | null>(null);
   const reloads = useRef<ReloadScheduler | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const loadedRef = useRef(loaded);
+  loadedRef.current = loaded;
+  /** A page a link asked for before the first document opened. */
+  const pendingLinkPage = useRef(linkedPage(params));
   const [reload, setReload] = useState<{ state: ReloadState; error: string | null }>({
     state: "loading",
     error: null,
@@ -121,9 +126,13 @@ export function WebPdfPanel({ file, tab, theme, layout }: PluginFilePanelProps) 
     const scheduler = createReloadScheduler({
       run: async () => {
         const bytes = await file.readBytes();
-        // The first document opens where the tab was left; later versions keep the reader's place.
-        await controller.open(bytes, { view: restored ? "current" : savedRef.current });
+        // The first document opens at the linked page or where the tab was left; later versions
+        // keep the reader's place.
+        const page = pendingLinkPage.current;
+        const view = page ? { ...savedRef.current, page, left: null, top: null } : savedRef.current;
+        await controller.open(bytes, { view: restored ? "current" : view });
         restored = true;
+        pendingLinkPage.current = null;
       },
       onState: (state, error) =>
         setReload({ state, error: error === undefined ? null : messageOf(error) }),
@@ -152,6 +161,17 @@ export function WebPdfPanel({ file, tab, theme, layout }: PluginFilePanelProps) 
   useEffect(() => {
     viewer.current?.setTheme(theme);
   }, [theme]);
+
+  // A link to a page of this file while its tab is open re-sends the params with a new revision.
+  const openedRevision = useRef(revision);
+  useEffect(() => {
+    if (revision === openedRevision.current) return;
+    openedRevision.current = revision;
+    const page = linkedPage(params);
+    if (page === null) return;
+    if (loadedRef.current) viewer.current?.setPage(page);
+    else pendingLinkPage.current = page;
+  }, [revision, params]);
 
   const onFindQuery = useCallback((query: string) => {
     setFindQuery(query);
